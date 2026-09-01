@@ -12,7 +12,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/${{ github.repository_owner }}/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-  KUSTOMIZE_PATH: ./manifests/production
+  KUSTOMIZE_PATH: ./manifests/overlays/production
 
 jobs:
   build-fastapi:
@@ -26,8 +26,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
-          context: .
-          file: Dockerfile
+          context: ./backend-fastapi
+          file: ./backend-fastapi/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_BASE }}:latest
@@ -92,7 +92,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Set new image tags via Kustomize
         run: |
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
@@ -101,13 +100,10 @@ jobs:
             ${{ env.IMAGE_BASE }}=${{ env.IMAGE_BASE }}:${{ github.sha }} \
             ${{ env.IMAGE_BASE }}-consumer=${{ env.IMAGE_BASE }}-consumer:${{ github.sha }} \
             ${{ env.IMAGE_BASE }}-spring=${{ env.IMAGE_BASE }}-spring:${{ github.sha }}
-
-      # ArgoCD śledzi ten branch/ścieżkę (KUSTOMIZE_PATH=./manifests/production) i sam
-      # zsynchronizuje klaster po tym commicie (automated sync w argocd/application.yaml).
       - name: Commit updated manifests
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add manifests/base/kustomization.yaml
-          git diff --cached --quiet || git commit -m "ci: aktualizacja obrazów na ${{ github.sha }}"
+          git diff --cached --quiet || git commit -m "ci: aktualizacja obrazow na ${{ github.sha }}"
           git push

@@ -1,5 +1,4 @@
-# Wymaga Prometheus Operatora (CRD ServiceMonitor). Jeśli używasz "gołego" Prometheusa
-# jak w prometheus.yaml, ten plik można pominąć w kustomization.yaml.
+# Wymaga Prometheus Operatora (CRD ServiceMonitor)
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

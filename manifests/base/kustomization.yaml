@@ -19,8 +19,7 @@ resources:
   - spark.yaml
   - prometheus.yaml
   - exporters.yaml
-  # service-monitors.yaml wymaga Prometheus Operatora (CRD) - odkomentuj, jeśli zainstalowany
-  # - service-monitors.yaml
+  # - service-monitors.yaml  # odkomentuj jesli zainstalowany Prometheus Operator
   - grafana.yaml
   - loki.yaml
   - promtail.yaml

@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01.git
     targetRevision: HEAD
-    path: manifests/production
+    path: manifests/overlays/production
   destination:
     server: https://kubernetes.default.svc
     namespace: davtro

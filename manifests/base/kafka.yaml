@@ -1,4 +1,4 @@
-# Kafka w trybie KRaft (bez Zookeepera) - pojedynczy broker do celów tego projektu.
+# Kafka KRaft (bez Zookeepera)
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -43,7 +43,6 @@ spec:
     - { name: broker, port: 9092, targetPort: 9092 }
     - { name: controller, port: 9093, targetPort: 9093 }
 ---
-# Job tworzący tematy Kafka (booking-events, marketing-events) przy starcie.
 apiVersion: batch/v1
 kind: Job
 metadata:

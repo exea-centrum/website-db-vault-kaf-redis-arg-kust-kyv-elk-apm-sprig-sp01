@@ -1,4 +1,3 @@
-# Konsument Kafka: booking-events + marketing-events -> e-mail + aktualizacja Postgresql.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

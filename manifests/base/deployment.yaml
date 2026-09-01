@@ -21,10 +21,10 @@ spec:
             - configMapRef: { name: fastapi-config }
             - secretRef: { name: davtro-secrets }
           readinessProbe:
-            httpGet: { path: /healthz, port: 8080 }
+            httpGet: { path: /api/health, port: 8080 }
             initialDelaySeconds: 5
           livenessProbe:
-            httpGet: { path: /healthz, port: 8080 }
+            httpGet: { path: /api/health, port: 8080 }
             initialDelaySeconds: 15
           resources:
             requests: { cpu: 100m, memory: 256Mi }

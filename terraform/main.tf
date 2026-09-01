@@ -24,7 +24,7 @@ variable "ghcr_pat" {
 
 resource "github_repository" "repo" {
   name        = "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01"
-  description = "Davtro Apartments - platforma wynajmu krótkoterminowego (K8s/ArgoCD/Kafka/Redis/Vault)"
+  description = "Davtro Apartments - platforma wynajmu krotkoterminowego (K8s/ArgoCD/Kafka/Redis/Vault)"
   visibility  = "private"
 }
 

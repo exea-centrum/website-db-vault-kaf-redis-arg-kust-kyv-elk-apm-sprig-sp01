@@ -1,6 +1,4 @@
-# Minimalna instancja Vault (dev-mode) do integracji z ArgoCD Vault Plugin.
-# W produkcji: użyj oficjalnego Helm chartu HashiCorp Vault (HA + auto-unseal),
-# tu podana jest wersja uproszczona zgodna z resztą manifestów Kustomize.
+# Dev-mode Vault - w produkcji uzyj Helm chart HashiCorp Vault (HA + auto-unseal)
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
