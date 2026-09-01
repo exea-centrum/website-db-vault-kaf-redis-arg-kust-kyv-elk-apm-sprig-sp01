@@ -21,7 +21,6 @@ NC='\033[0m'
 # ZMIENNE GLOBALNE
 # ============================================
 PROJECT_NAME="website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01"
-GITHUB_REPO="https://github.com/exea-centrum/${PROJECT_NAME}.git"
 NAMESPACE="davtro"
 VERSION="2.0.0"
 TEMP_DIR="/tmp/${PROJECT_NAME}_$(date +%s)"
@@ -90,80 +89,23 @@ check_requirements() {
 }
 
 # ============================================
-# FUNKCJA: Sprawdzanie wolnego miejsca
-# ============================================
-check_disk_space() {
-    print_step "Sprawdzanie wolnego miejsca na dysku..."
-    
-    local required_space=1024
-    local available_space=$(df -m . | tail -1 | awk '{print $4}')
-    
-    if [ $available_space -lt $required_space ]; then
-        print_error "Za mało miejsca na dysku! Wymagane: ${required_space}MB, dostępne: ${available_space}MB"
-        exit 1
-    fi
-    
-    print_success "Wystarczająca ilość miejsca na dysku (${available_space}MB dostępne)"
-}
-
-# ============================================
 # FUNKCJA: Wyświetlanie logo
 # ============================================
 show_logo() {
     echo -e "${BLUE}"
-    cat << "LOGO_EOF"
-    ╔═══════════════════════════════════════════════════════════╗
-    ║                                                           ║
-    ║   ██████╗  █████╗ ██╗    ██╗██╗██████╗                  ║
-    ║   ██╔══██╗██╔══██╗██║    ██║██║██╔══██╗                 ║
-    ║   ██║  ██║███████║██║ █╗ ██║██║██║  ██║                 ║
-    ║   ██║  ██║██╔══██║██║███╗██║██║██║  ██║                 ║
-    ║   ██████╔╝██║  ██║╚███╔███╔╝██║██████╔╝                 ║
-    ║   ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝╚═════╝                  ║
-    ║                                                           ║
-    ║   ████████╗██████╗  ██████╗ ██╗ █████╗ ███╗   ██╗       ║
-    ║   ╚══██╔══╝██╔══██╗██╔═══██╗██║██╔══██╗████╗  ██║       ║
-    ║      ██║   ██████╔╝██║   ██║██║███████║██╔██╗ ██║       ║
-    ║      ██║   ██╔══██╗██║   ██║██║██╔══██║██║╚██╗██║       ║
-    ║      ██║   ██║  ██║╚██████╔╝██║██║  ██║██║ ╚████║       ║
-    ║      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝       ║
-    ║                                                           ║
-    ║     🏠 SYSTEM WYNAJMU MIESZKAŃ - v${VERSION}            ║
-    ║     Dawid Trojanowski © 2025                             ║
-    ╚═══════════════════════════════════════════════════════════╝
-LOGO_EOF
+    echo "    ╔═══════════════════════════════════════════════════════════╗"
+    echo "    ║                                                           ║"
+    echo "    ║   ██████╗  █████╗ ██╗    ██╗██╗██████╗                  ║"
+    echo "    ║   ██╔══██╗██╔══██╗██║    ██║██║██╔══██╗                 ║"
+    echo "    ║   ██║  ██║███████║██║ █╗ ██║██║██║  ██║                 ║"
+    echo "    ║   ██║  ██║██╔══██║██║███╗██║██║██║  ██║                 ║"
+    echo "    ║   ██████╔╝██║  ██║╚███╔███╔╝██║██████╔╝                 ║"
+    echo "    ║   ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝╚═════╝                  ║"
+    echo "    ║                                                           ║"
+    echo "    ║     🏠 SYSTEM WYNAJMU MIESZKAŃ - v${VERSION}            ║"
+    echo "    ║     Dawid Trojanowski © 2025                             ║"
+    echo "    ╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
-}
-
-# ============================================
-# FUNKCJA: Pobieranie projektu
-# ============================================
-download_project() {
-    print_step "Pobieranie projektu z GitHub..."
-    
-    mkdir -p "$TEMP_DIR"
-    cd "$TEMP_DIR"
-    
-    print_info "Klonowanie repozytorium: $GITHUB_REPO"
-    git clone --depth 1 "$GITHUB_REPO" . || {
-        print_warning "Nie udało się sklonować repozytorium, tworzę lokalny projekt..."
-        create_project_files
-        return
-    }
-    check_error "Nie udało się sklonować repozytorium"
-    
-    print_success "Projekt pobrany pomyślnie"
-}
-
-# ============================================
-# FUNKCJA: Tworzenie podstawowej struktury
-# ============================================
-create_basic_structure() {
-    mkdir -p app/static app/templates
-    mkdir -p backend/app backend/migrations
-    mkdir -p manifests/{base,production,staging,dev}
-    mkdir -p scripts configs
-    mkdir -p .github/workflows
 }
 
 # ============================================
@@ -172,13 +114,17 @@ create_basic_structure() {
 create_project_files() {
     print_step "Tworzenie plików projektu..."
     
+    mkdir -p "$TEMP_DIR"
     cd "$TEMP_DIR"
-    create_basic_structure
     
-    # ============================================
-    # APP - FRONTEND (uproszczona wersja)
-    # ============================================
-    cat > app/index.html << 'HTML_EOF'
+    mkdir -p app/static app/templates
+    mkdir -p backend/app backend/migrations
+    mkdir -p manifests/{base,production,staging,dev}
+    mkdir -p scripts configs
+    mkdir -p .github/workflows
+    
+    # Frontend
+    cat > app/index.html << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -198,7 +144,6 @@ create_project_files() {
                 <h1 class="text-2xl font-bold">🏠 Wynajem Mieszkań</h1>
             </div>
         </header>
-        
         <section class="bg-gradient text-white py-20">
             <div class="container mx-auto px-6 text-center">
                 <h2 class="text-5xl font-bold mb-6">Znajdź idealne mieszkanie</h2>
@@ -215,8 +160,7 @@ create_project_files() {
                 </div>
             </div>
         </section>
-
-        <section id="offers" class="py-16">
+        <section class="py-16">
             <div class="container mx-auto px-6">
                 <h2 class="text-4xl font-bold text-center mb-12 text-gray-800">🏠 Dostępne Mieszkania</h2>
                 <div class="grid md:grid-cols-3 gap-8">
@@ -250,7 +194,6 @@ create_project_files() {
                 </div>
             </div>
         </section>
-
         <footer class="bg-gray-900 text-white py-8">
             <div class="container mx-auto px-6 text-center">
                 <p>&copy; 2025 Dawid Trojanowski - Wynajem Mieszkań</p>
@@ -259,18 +202,15 @@ create_project_files() {
     </div>
 </body>
 </html>
-HTML_EOF
+EOF
 
-    # ============================================
-    # BACKEND - FASTAPI
-    # ============================================
-    cat > backend/app/main.py << 'PY_EOF'
+    # Backend
+    cat > backend/app/main.py << 'EOF'
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from datetime import datetime
-import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -297,18 +237,16 @@ async def health_check():
 @app.get("/api/properties")
 async def get_properties():
     return [
-        {"id": 1, "name": "Apartament Centrum", "price": 350, "guests": 4, "image": "🏢", "rating": 4.8},
-        {"id": 2, "name": "Przytulne Studio", "price": 250, "guests": 2, "image": "🏠", "rating": 4.9},
-        {"id": 3, "name": "Luksusowy Penthouse", "price": 550, "guests": 6, "image": "🏙️", "rating": 4.7}
+        {"id": 1, "name": "Apartament Centrum", "price": 350, "guests": 4},
+        {"id": 2, "name": "Przytulne Studio", "price": 250, "guests": 2},
+        {"id": 3, "name": "Luksusowy Penthouse", "price": 550, "guests": 6}
     ]
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
-PY_EOF
+EOF
 
-    # ============================================
-    # DOCKERFILE
-    # ============================================
-    cat > Dockerfile << 'DOCKER_EOF'
+    # Dockerfile
+    cat > Dockerfile << 'EOF'
 FROM python:3.11-slim
 WORKDIR /app
 COPY backend/requirements.txt .
@@ -317,22 +255,17 @@ COPY backend/app ./app
 COPY app ./app/static
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-DOCKER_EOF
+EOF
 
-    # ============================================
-    # REQUIREMENTS.TXT
-    # ============================================
-    cat > backend/requirements.txt << 'REQ_EOF'
+    # Requirements
+    cat > backend/requirements.txt << 'EOF'
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
-python-multipart==0.0.6
-REQ_EOF
+EOF
 
-    # ============================================
-    # DOCKER-COMPOSE
-    # ============================================
-    cat > docker-compose.yml << 'COMPOSE_EOF'
+    # Docker Compose
+    cat > docker-compose.yml << 'EOF'
 version: '3.8'
 services:
   app:
@@ -369,12 +302,10 @@ services:
       KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
     ports:
       - "9092:9092"
-COMPOSE_EOF
+EOF
 
-    # ============================================
-    # MANIFESTY KUBERNETES
-    # ============================================
-    cat > manifests/base/namespace.yaml << 'NS_EOF'
+    # Kubernetes manifests
+    cat > manifests/base/namespace.yaml << 'EOF'
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -382,9 +313,9 @@ metadata:
   labels:
     name: davtro
     environment: production
-NS_EOF
+EOF
 
-    cat > manifests/base/deployment.yaml << 'DEPLOY_EOF'
+    cat > manifests/base/deployment.yaml << 'EOF'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -419,9 +350,9 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
-DEPLOY_EOF
+EOF
 
-    cat > manifests/base/service.yaml << 'SVC_EOF'
+    cat > manifests/base/service.yaml << 'EOF'
 apiVersion: v1
 kind: Service
 metadata:
@@ -434,12 +365,10 @@ spec:
     targetPort: 8000
   selector:
     app: booking-app
-SVC_EOF
+EOF
 
-    # ============================================
-    # SKRYPT DEPLOY
-    # ============================================
-    cat > scripts/deploy.sh << 'DEPLOY_SCRIPT_EOF'
+    # Deploy script
+    cat > scripts/deploy.sh << 'EOF'
 #!/bin/bash
 set -e
 NAMESPACE="davtro"
@@ -448,13 +377,11 @@ kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f 
 kubectl apply -k manifests/production -n $NAMESPACE
 echo "✅ Deployment zakończony!"
 echo "🌐 kubectl port-forward svc/booking-app-service 8000:8000 -n $NAMESPACE"
-DEPLOY_SCRIPT_EOF
+EOF
     chmod +x scripts/deploy.sh
 
-    # ============================================
     # README
-    # ============================================
-    cat > README.md << 'README_EOF'
+    cat > README.md << 'EOF'
 # 🏠 System Wynajmu Mieszkań
 
 ## Szybki start
