@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/exea-centrum/website-argocd-k8s-github-kustomize.git
+    repoURL: https://github.com/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01.git
     targetRevision: HEAD
     path: manifests/production
   destination:
