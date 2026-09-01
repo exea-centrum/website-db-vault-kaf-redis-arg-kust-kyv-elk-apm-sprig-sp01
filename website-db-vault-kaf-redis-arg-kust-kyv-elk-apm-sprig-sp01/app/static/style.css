@@ -1,0 +1,6 @@
+@keyframes fadeIn { from { opacity:0; transform:translateY(10px);} to {opacity:1; transform:translateY(0);} }
+.animate-fade-in { animation: fadeIn 0.5s ease-out; }
+.tab-btn.active { background-color:#a855f7; color:#fff; }
+.day.booked { background:#7f1d1d; cursor:not-allowed; opacity:.5; }
+.day.free { background:#334155; cursor:pointer; }
+.day.free:hover { background:#7c3aed; }

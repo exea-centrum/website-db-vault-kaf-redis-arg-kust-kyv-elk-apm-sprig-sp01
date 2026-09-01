@@ -1,0 +1,15 @@
+# Wymaga Prometheus Operatora (CRD ServiceMonitor). Jeśli używasz "gołego" Prometheusa
+# jak w prometheus.yaml, ten plik można pominąć w kustomization.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: davtro-services
+  namespace: davtro
+  labels: { release: prometheus }
+spec:
+  selector:
+    matchExpressions:
+      - { key: app, operator: In, values: [fastapi-web-app, postgres-exporter, kafka-exporter] }
+  endpoints:
+    - port: metrics
+      interval: 15s
