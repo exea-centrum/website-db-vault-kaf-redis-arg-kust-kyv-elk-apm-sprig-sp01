@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: service-monitors
+  namespace: question-system
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: fastapi-app
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 15s

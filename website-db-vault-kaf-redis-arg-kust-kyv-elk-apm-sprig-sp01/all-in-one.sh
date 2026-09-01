@@ -1,1969 +1,2423 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# ============================================================================
+# System Przetwarzania Pytań - All-in-One Setup Script
+# Przepływ: FastAPI → Redis → Kafka → PostgreSQL
+# Data: 2026-09-01
+# ============================================================================
+
 set -e
-echo "Rozpakowywanie projektu website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01 ..."
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/.github/workflows"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/static"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/templates"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/argocd"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/java-app"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/java-app/src/main/java/com/davtro/app"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/java-app/src/main/resources"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/kyverno-policies"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/production"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/spark-jobs"
-mkdir -p "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/terraform"
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/.github/workflows/ci-cd.yaml" << 'DAVTRO_EOF'
-name: CI/CD - Davtro Platform
 
-permissions:
-  contents: write
-  packages: write
+# Kolory
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_step()    { echo -e "${CYAN}==>${NC} $1"; }
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_BASE: ghcr.io/${{ github.repository_owner }}/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-  KUSTOMIZE_PATH: ./manifests/production
+PROJECT_DIR="question-processing-system"
 
-jobs:
-  build-fastapi:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}:latest
-            ${{ env.IMAGE_BASE }}:${{ github.sha }}
+echo ""
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  System Przetwarzania Pytań - Generator Projektu          ║${NC}"
+echo -e "${GREEN}║  FastAPI → Redis → Kafka → PostgreSQL                     ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+echo ""
 
-  build-consumer:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.consumer
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-consumer:latest
-            ${{ env.IMAGE_BASE }}-consumer:${{ github.sha }}
+# ============================================================================
+# 1. STRUKTURA KATALOGÓW
+# ============================================================================
+log_step "Tworzenie struktury katalogów..."
 
-  build-spring:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./java-app
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-spring:latest
-            ${{ env.IMAGE_BASE }}-spring:${{ github.sha }}
+mkdir -p "$PROJECT_DIR"/{apps/{fastapi-app,message-processor,redis-to-kafka,spring-app},k8s/{base,monitoring,tools,policies},scripts,docs}
 
-  build-spark:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./spark-jobs
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-spark:latest
-            ${{ env.IMAGE_BASE }}-spark:${{ github.sha }}
+cd "$PROJECT_DIR"
 
-  update-manifests:
-    runs-on: ubuntu-latest
-    needs: [build-fastapi, build-consumer, build-spring, build-spark]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+# ============================================================================
+# 2. APLIKACJA FASTAPI (Web UI + Producer do Redis)
+# ============================================================================
+log_step "Tworzenie FastAPI Application..."
 
-      - name: Set new image tags via Kustomize
-        run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-          cd manifests/base
-          ../../kustomize edit set image \
-            ${{ env.IMAGE_BASE }}=${{ env.IMAGE_BASE }}:${{ github.sha }} \
-            ${{ env.IMAGE_BASE }}-consumer=${{ env.IMAGE_BASE }}-consumer:${{ github.sha }} \
-            ${{ env.IMAGE_BASE }}-spring=${{ env.IMAGE_BASE }}-spring:${{ github.sha }}
-
-      # ArgoCD śledzi ten branch/ścieżkę (KUSTOMIZE_PATH=./manifests/production) i sam
-      # zsynchronizuje klaster po tym commicie (automated sync w argocd/application.yaml).
-      - name: Commit updated manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add manifests/base/kustomization.yaml
-          git diff --cached --quiet || git commit -m "ci: aktualizacja obrazów na ${{ github.sha }}"
-          git push
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/Dockerfile" << 'DAVTRO_EOF'
-FROM python:3.12-slim AS base
-WORKDIR /srv
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && rm -rf /var/lib/apt/lists/*
-COPY app/requirements.txt ./app/requirements.txt
-RUN pip install --no-cache-dir -r app/requirements.txt
-COPY app ./app
-EXPOSE 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/Dockerfile.consumer" << 'DAVTRO_EOF'
-FROM python:3.12-slim
-WORKDIR /srv
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && rm -rf /var/lib/apt/lists/*
-COPY app/requirements.txt ./app/requirements.txt
-RUN pip install --no-cache-dir -r app/requirements.txt
-COPY app ./app
-CMD ["python", "-m", "app.consumer"]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/README.md" << 'DAVTRO_EOF'
-# Davtro Apartments – platforma wynajmu krótkoterminowego
-
-Repo: `website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01`
-Namespace docelowy: `davtro`
-KUSTOMIZE_IMAGE_ID: `website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01`
-KUSTOMIZE_PATH: `./manifests/production`
-
-## Architektura przepływu rezerwacji
-1. Użytkownik rezerwuje termin na stronie (kalendarz w `app/templates/index.html`).
-2. `FastAPI` (`app/main.py`) zapisuje rezerwację w PostgreSQL, buforuje event w Redis, publikuje do Kafka (`booking-events`).
-3. `message-processor` (`app/consumer.py`) konsumuje event, wysyła e-mail (potwierdzenie + faktura proforma) i aktualizuje status w PostgreSQL.
-4. Zgody marketingowe trafiają do tematu `marketing-events`, konsumowane tak samo, dodatkowo agregowane przez `spark-jobs/marketing_analytics.py`.
-5. `spring-app-deployment` udostępnia panel raportowy/administracyjny na tych samych danych.
-6. Sekrety (SMTP, DB) mają docelowo pochodzić z Vault (patrz `manifests/base/secret.yaml` i sekcja "Vault" niżej), nie z repo.
-
-## Struktura repo
-```
-app/                  # FastAPI (web + API rezerwacji) + konsument Kafka + wysyłka e-mail
-java-app/             # Spring Boot – panel raportowy
-spark-jobs/           # Spark – analityka marketingowa
-manifests/base/       # Wszystkie zasoby K8s (Kustomize base)
-manifests/production/ # Overlay produkcyjny (namespace davtro, replicas)
-kyverno-policies/     # Polityki Kyverno (kopiowane też do manifests/base)
-.github/workflows/    # CI: build obrazów -> GHCR -> aktualizacja Kustomize -> ArgoCD sync
-argocd/application.yaml
-terraform/            # Terraform Cloud (workspace github-actions-terraform)
-```
-
-## Uruchomienie lokalnie (dev, bez K8s)
-```bash
-cd app/.. 
-python -m venv .venv && source .venv/bin/activate
-pip install -r app/requirements.txt
-export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/davtro
-uvicorn app.main:app --reload --port 8080
-```
-
-## Wdrożenie na MicroK8s przez ArgoCD
-1. Włącz ingress: `microk8s enable ingress`
-2. Utwórz sekrety realne (nie commituj!) lub skonfiguruj Vault + ArgoCD Vault Plugin.
-3. Zastosuj `argocd/application.yaml`: `kubectl apply -f argocd/application.yaml -n argocd`
-4. Push do `main` -> GitHub Actions zbuduje obrazy i zaktualizuje tagi w `manifests/base/kustomization.yaml` -> ArgoCD (auto-sync) wdroży zmiany.
-
-## WAŻNE – rzeczy do dopracowania przed produkcją
-- `manifests/base/secret.yaml` zawiera placeholdery Vault (`<path:...>`) – wymaga realnej integracji ArgoCD Vault Plugin (AVP), inaczej sekrety trzeba podać ręcznie.
-- Vault jest w trybie `-dev` (dane nietrwałe) – do produkcji podmień na Helm chart HashiCorp Vault z auto-unseal.
-- `service-monitors.yaml` wymaga Prometheus Operatora (CRD `ServiceMonitor`) – jest wyłączony w `kustomization.yaml`, odkomentuj po instalacji operatora.
-- SMTP nie jest skonfigurowany – bez zmiennych `SMTP_*` e-maile tylko logują się do stdout (`app/email_sender.py`).
-- Obrazy produkcyjne CI/CD budują się pod `ghcr.io/<twoja-organizacja>/...` – ustaw `github.repository_owner` zgodnie z Twoim kontem/organizacją.
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/__init__.py" << 'DAVTRO_EOF'
-
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/consumer.py" << 'DAVTRO_EOF'
-"""
-message-processor: osobny deployment/consumer.
-Czyta z tematów Kafka 'booking-events' i 'marketing-events',
-wysyła e-mail (potwierdzenie + faktura proforma) i aktualizuje status w Postgresql.
-Kolejka Redis służy do deduplikacji/idempotencji przetwarzania.
-"""
-import json
-import os
-import time
-
+cat > apps/fastapi-app/main.py << 'FASTAPI_EOF'
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 import redis
-from confluent_kafka import Consumer
-
-from .db import SessionLocal, Booking
-from .email_sender import send_confirmation_email, send_marketing_email
-
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-kraft:9092")
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-
-
-def handle_booking_event(event: dict):
-    dedup_key = f"processed:{event['event_id']}"
-    if redis_client.get(dedup_key):
-        return  # już przetworzone
-    send_confirmation_email(event["guest_email"], event["guest_name"], event)
-
-    session = SessionLocal()
-    try:
-        booking = session.query(Booking).get(event["booking_id"])
-        if booking:
-            booking.status = "confirmed"
-            booking.invoice_sent = True
-            session.commit()
-    finally:
-        session.close()
-
-    redis_client.setex(dedup_key, 86400, "1")
-
-
-def handle_marketing_event(event: dict):
-    send_marketing_email(event["guest_email"], event["guest_name"])
-
-
-def main():
-    consumer = Consumer({
-        "bootstrap.servers": KAFKA_BOOTSTRAP,
-        "group.id": "message-processor",
-        "auto.offset.reset": "earliest",
-    })
-    consumer.subscribe(["booking-events", "marketing-events"])
-    print("message-processor: nasłuchiwanie na booking-events i marketing-events...")
-    try:
-        while True:
-            msg = consumer.poll(1.0)
-            if msg is None:
-                continue
-            if msg.error():
-                print("Kafka error:", msg.error())
-                continue
-            event = json.loads(msg.value().decode("utf-8"))
-            if msg.topic() == "booking-events":
-                handle_booking_event(event)
-            elif msg.topic() == "marketing-events":
-                handle_marketing_event(event)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        consumer.close()
-
-
-if __name__ == "__main__":
-    main()
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/db.py" << 'DAVTRO_EOF'
-import os
-from sqlalchemy import create_engine, Column, Integer, String, Numeric, Date, Boolean, DateTime, func
-from sqlalchemy.orm import declarative_base, sessionmaker
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@postgres-clusterip:5432/davtro",
-)
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base = declarative_base()
-
-
-class Apartment(Base):
-    __tablename__ = "apartments"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    description = Column(String)
-    price_per_night = Column(Numeric(10, 2), nullable=False)
-
-
-class Booking(Base):
-    __tablename__ = "bookings"
-    id = Column(Integer, primary_key=True)
-    apartment_id = Column(Integer, nullable=False)
-    date_from = Column(Date, nullable=False)
-    date_to = Column(Date, nullable=False)
-    guest_name = Column(String, nullable=False)
-    guest_email = Column(String, nullable=False)
-    marketing_consent = Column(Boolean, default=False)
-    status = Column(String, default="pending")  # pending -> confirmed
-    invoice_sent = Column(Boolean, default=False)
-    created_at = Column(DateTime, server_default=func.now())
-
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
-    session = SessionLocal()
-    if session.query(Apartment).count() == 0:
-        session.add_all([
-            Apartment(name="Apartament Centrum", description="2 pokoje, blisko rynku", price_per_night=250),
-            Apartment(name="Apartament Panoramiczny", description="Widok na miasto", price_per_night=320),
-            Apartment(name="Studio Kompakt", description="Idealne dla pary", price_per_night=180),
-        ])
-        session.commit()
-    session.close()
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/email_sender.py" << 'DAVTRO_EOF'
-"""
-Wysyłka e-maili (potwierdzenie rezerwacji + faktura proforma, kampanie marketingowe).
-W produkcji: podmień na realny SMTP / SES / SendGrid - dane dostępowe trzymane w Vault,
-wstrzykiwane jako sekrety K8s (patrz manifests/base/secret.yaml).
-"""
-import os
-import smtplib
-from email.mime.text import MIMEText
-
-SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "rezerwacje@davtro.pl")
-
-
-def _send(to_email: str, subject: str, body: str):
-    if not SMTP_HOST:
-        print(f"[DEV] Email do {to_email}: {subject}\n{body}")
-        return
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = FROM_EMAIL
-    msg["To"] = to_email
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.sendmail(FROM_EMAIL, [to_email], msg.as_string())
-
-
-def send_confirmation_email(to_email: str, guest_name: str, event: dict):
-    subject = f"Potwierdzenie rezerwacji nr {event['booking_id']}"
-    body = (
-        f"Cześć {guest_name},\n\n"
-        f"Twoja rezerwacja ({event['date_from']} - {event['date_to']}) została potwierdzona.\n"
-        f"W załączeniu (proforma) prosimy o dokonanie płatności przed przyjazdem.\n\n"
-        f"Pozdrawiamy,\nDavtro Apartments"
-    )
-    _send(to_email, subject, body)
-
-
-def send_marketing_email(to_email: str, guest_name: str):
-    subject = "Sprawdź nasze najnowsze oferty!"
-    body = f"Cześć {guest_name}, mamy dla Ciebie nowe promocje na pobyty krótkoterminowe."
-    _send(to_email, subject, body)
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/kafka_producer.py" << 'DAVTRO_EOF'
 import json
 import os
-from confluent_kafka import Producer
-
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-kraft:9092")
-_producer = None
-
-
-def get_producer():
-    global _producer
-    if _producer is None:
-        _producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP})
-    return _producer
-
-
-def publish_event(topic: str, event: dict):
-    producer = get_producer()
-    producer.produce(topic, json.dumps(event).encode("utf-8"))
-    producer.flush(5)
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/main.py" << 'DAVTRO_EOF'
-"""
-FastAPI - główne API strony wynajmu mieszkań.
-Przepływ rezerwacji: Klient -> FastAPI -> Redis (bufor/kolejka) -> Kafka (booking-events)
-                      -> message-processor (consumer) -> wysyłka e-mail (potwierdzenie + proforma) -> Postgres (status)
-Kafka obsługuje też temat marketing-events (akcje marketingowe po wyrażeniu zgody).
-"""
-import json
-import os
+import logging
 import uuid
 from datetime import datetime
 
-import redis
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from prometheus_fastapi_instrumentator import Instrumentator
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-from .db import init_db, SessionLocal, Apartment, Booking
-from .kafka_producer import publish_event
+app = FastAPI(title="Question Processing System", version="1.0.0")
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 
-app = FastAPI(title="Davtro Apartments API")
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
-Instrumentator().instrument(app).expose(app)  # metryki dla Prometheus
+redis_client = redis.Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    password=REDIS_PASSWORD if REDIS_PASSWORD else None,
+    decode_responses=True
+)
 
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+class Question(BaseModel):
+    id: str = None
+    content: str
+    author: str
+    timestamp: str = None
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        if not self.id:
+            self.id = f"Q-{uuid.uuid4().hex[:8]}"
+        if not self.timestamp:
+            self.timestamp = datetime.utcnow().isoformat()
 
-@app.on_event("startup")
-def on_startup():
-    init_db()
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return """
+    <!DOCTYPE html>
+    <html lang="pl">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>System Przetwarzania Pytań</title>
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+                font-family: 'Segoe UI', Tahoma, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 40px 20px;
+            }
+            .container {
+                max-width: 900px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                overflow: hidden;
+            }
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 40px;
+                text-align: center;
+            }
+            .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+            .header p { opacity: 0.9; font-size: 1.1em; }
+            .content { padding: 40px; }
+            .flow-diagram {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 40px;
+                padding: 20px;
+                background: #f8f9fa;
+                border-radius: 10px;
+                flex-wrap: wrap;
+            }
+            .flow-step {
+                padding: 15px 25px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border-radius: 8px;
+                font-weight: 600;
+                text-align: center;
+                min-width: 120px;
+            }
+            .flow-arrow { color: #667eea; font-size: 28px; font-weight: bold; }
+            .form-group { margin-bottom: 20px; }
+            label {
+                display: block;
+                margin-bottom: 8px;
+                color: #333;
+                font-weight: 600;
+            }
+            input, textarea {
+                width: 100%;
+                padding: 12px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 16px;
+                transition: border-color 0.3s;
+                font-family: inherit;
+            }
+            input:focus, textarea:focus {
+                outline: none;
+                border-color: #667eea;
+            }
+            textarea { min-height: 120px; resize: vertical; }
+            button {
+                width: 100%;
+                padding: 15px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 18px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s, box-shadow 0.2s;
+            }
+            button:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+            }
+            button:disabled { opacity: 0.6; cursor: not-allowed; }
+            .status {
+                margin-top: 20px;
+                padding: 15px;
+                border-radius: 8px;
+                display: none;
+                font-weight: 500;
+            }
+            .status.success {
+                background: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            .status.error {
+                background: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+            }
+            .stats {
+                margin-top: 30px;
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+            }
+            .stat-card {
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 10px;
+                text-align: center;
+                border-left: 4px solid #667eea;
+            }
+            .stat-value { font-size: 2em; font-weight: bold; color: #667eea; }
+            .stat-label { color: #666; margin-top: 5px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🎓 System Przetwarzania Pytań</h1>
+                <p>Zadaj pytanie - przejdzie przez Redis, Kafka do PostgreSQL</p>
+            </div>
+            <div class="content">
+                <div class="flow-diagram">
+                    <div class="flow-step">📝 FastAPI</div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">⚡ Redis</div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">📨 Kafka</div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">🗄️ PostgreSQL</div>
+                </div>
 
+                <form id="questionForm">
+                    <div class="form-group">
+                        <label for="author">Autor (Student):</label>
+                        <input type="text" id="author" required placeholder="Jan Kowalski">
+                    </div>
+                    <div class="form-group">
+                        <label for="content">Treść pytania:</label>
+                        <textarea id="content" required placeholder="Wpisz swoje pytanie do wykładowcy..."></textarea>
+                    </div>
+                    <button type="submit" id="submitBtn">🚀 Wyślij pytanie</button>
+                </form>
 
-class BookingIn(BaseModel):
-    apartment_id: int
-    date_from: str
-    date_to: str
-    guest_name: str
-    guest_email: str
-    marketing_consent: bool = False
+                <div id="status" class="status"></div>
 
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalSent">0</div>
+                        <div class="stat-label">Wysłanych pytań</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="lastQuestion">-</div>
+                        <div class="stat-label">Ostatnie ID</div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-@app.get("/")
-def index():
-    return FileResponse("app/templates/index.html")
+        <script>
+            let totalSent = 0;
+            document.getElementById('questionForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const statusDiv = document.getElementById('status');
+                const submitBtn = document.getElementById('submitBtn');
+                submitBtn.disabled = true;
+                submitBtn.textContent = '⏳ Wysyłanie...';
 
+                const questionData = {
+                    author: document.getElementById('author').value,
+                    content: document.getElementById('content').value
+                };
 
-@app.get("/api/apartments")
-def list_apartments():
-    session = SessionLocal()
+                try {
+                    const response = await fetch('/api/questions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(questionData)
+                    });
+                    if (response.ok) {
+                        const result = await response.json();
+                        statusDiv.className = 'status success';
+                        statusDiv.innerHTML = `✅ <strong>Pytanie przyjęte!</strong><br>ID: ${result.question_id}<br>Status: ${result.status}<br>Timestamp: ${result.timestamp}`;
+                        statusDiv.style.display = 'block';
+                        totalSent++;
+                        document.getElementById('totalSent').textContent = totalSent;
+                        document.getElementById('lastQuestion').textContent = result.question_id;
+                        e.target.reset();
+                    } else {
+                        throw new Error('Błąd serwera');
+                    }
+                } catch (error) {
+                    statusDiv.className = 'status error';
+                    statusDiv.textContent = `❌ Błąd: ${error.message}`;
+                    statusDiv.style.display = 'block';
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '🚀 Wyślij pytanie';
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+
+@app.post("/api/questions")
+async def submit_question(question: Question):
     try:
-        rows = session.query(Apartment).all()
-        return [
-            {"id": a.id, "name": a.name, "description": a.description, "price_per_night": float(a.price_per_night)}
-            for a in rows
-        ]
-    finally:
-        session.close()
+        question_data = {
+            "id": question.id,
+            "content": question.content,
+            "author": question.author,
+            "timestamp": question.timestamp,
+            "status": "received"
+        }
+        redis_client.setex(f"question:{question.id}", 3600, json.dumps(question_data))
+        redis_client.lpush("questions:queue", json.dumps(question_data))
+        redis_client.incr("stats:questions_total")
+        logger.info(f"Question {question.id} queued")
+        return {
+            "status": "accepted",
+            "message": "Question queued for processing",
+            "question_id": question.id,
+            "timestamp": question.timestamp
+        }
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/questions/{question_id}")
+async def get_question(question_id: str):
+    data = redis_client.get(f"question:{question_id}")
+    if not data:
+        raise HTTPException(status_code=404, detail="Not found")
+    return json.loads(data)
 
-@app.get("/api/apartments/{apartment_id}/availability")
-def availability(apartment_id: int):
-    """Zwraca zajęte przedziały dat, żeby kalendarz na froncie mógł je wyszarzyć."""
-    session = SessionLocal()
+@app.get("/health")
+async def health():
     try:
-        rows = session.query(Booking).filter(
-            Booking.apartment_id == apartment_id,
-            Booking.status != "cancelled",
-        ).all()
-        return [{"date_from": str(b.date_from), "date_to": str(b.date_to)} for b in rows]
-    finally:
-        session.close()
+        redis_client.ping()
+        return {"status": "healthy", "redis": "connected"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
 
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+FASTAPI_EOF
 
-@app.post("/api/bookings")
-def create_booking(payload: BookingIn):
-    if payload.date_from >= payload.date_to:
-        raise HTTPException(status_code=400, detail="Data 'do' musi być późniejsza niż data 'od'")
+cat > apps/fastapi-app/requirements.txt << 'EOF'
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+redis==5.0.1
+pydantic==2.5.3
+python-multipart==0.0.6
+EOF
 
-    session = SessionLocal()
-    try:
-        booking = Booking(
-            apartment_id=payload.apartment_id,
-            date_from=datetime.strptime(payload.date_from, "%Y-%m-%d").date(),
-            date_to=datetime.strptime(payload.date_to, "%Y-%m-%d").date(),
-            guest_name=payload.guest_name,
-            guest_email=payload.guest_email,
-            marketing_consent=payload.marketing_consent,
-            status="pending",
-        )
-        session.add(booking)
-        session.commit()
-        session.refresh(booking)
-        booking_id = booking.id
-    finally:
-        session.close()
-
-    event = {
-        "event_id": str(uuid.uuid4()),
-        "booking_id": booking_id,
-        "guest_email": payload.guest_email,
-        "guest_name": payload.guest_name,
-        "apartment_id": payload.apartment_id,
-        "date_from": payload.date_from,
-        "date_to": payload.date_to,
-        "type": "booking_confirmation",
-    }
-
-    # Redis jako szybki bufor/idempotency-cache przed publikacją do Kafki
-    redis_client.setex(f"booking:{event['event_id']}", 3600, json.dumps(event))
-    publish_event("booking-events", event)
-
-    if payload.marketing_consent:
-        publish_event("marketing-events", {
-            "event_id": str(uuid.uuid4()),
-            "guest_email": payload.guest_email,
-            "guest_name": payload.guest_name,
-            "type": "newsletter_opt_in",
-        })
-
-    return {"booking_id": booking_id, "status": "pending", "message": "Rezerwacja zapisana, e-mail w drodze"}
-
-
-@app.get("/healthz")
-def healthz():
-    return {"status": "ok"}
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/requirements.txt" << 'DAVTRO_EOF'
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-sqlalchemy==2.0.35
-psycopg2-binary==2.9.9
-redis==5.0.8
-confluent-kafka==2.5.3
-jinja2==3.1.4
-python-multipart==0.0.9
-pydantic==2.9.2
-prometheus-fastapi-instrumentator==7.0.0
-hvac==2.3.0
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/static/script.js" << 'DAVTRO_EOF'
-function showTab(tabName) {
-  document.querySelectorAll(".tab-content").forEach(t => t.classList.add("hidden"));
-  document.getElementById(tabName + "-tab").classList.remove("hidden");
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-  document.querySelector(`[data-tab="${tabName}"]`).classList.add("active");
-}
-showTab("offer");
-
-// Pobiera oferty mieszkań z backendu (FastAPI -> Postgres)
-async function loadApartments() {
-  try {
-    const res = await fetch("/api/apartments");
-    const data = await res.json();
-    const grid = document.getElementById("apartments-grid");
-    grid.innerHTML = data.map(a => `
-      <div class="bg-gradient-to-br from-blue-500/10 to-purple-500/10 backdrop-blur-lg border border-blue-500/20 rounded-xl p-6">
-        <h3 class="text-xl font-bold mb-2 text-blue-300">${a.name}</h3>
-        <p class="text-gray-400 mb-2">${a.description || ""}</p>
-        <p class="text-purple-300 font-bold">${a.price_per_night} zł / noc</p>
-      </div>`).join("");
-  } catch (e) { console.error("Nie udało się pobrać ofert", e); }
-}
-loadApartments();
-
-// Rezerwacja -> POST /api/bookings -> backend publikuje event do Kafki (przez Redis jako bufor)
-document.getElementById("booking-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const payload = {
-    apartment_id: document.getElementById("apartment-id").value,
-    date_from: document.getElementById("date-from").value,
-    date_to: document.getElementById("date-to").value,
-    guest_name: document.getElementById("guest-name").value,
-    guest_email: document.getElementById("guest-email").value,
-    marketing_consent: document.getElementById("marketing-consent").checked
-  };
-  const resultEl = document.getElementById("booking-result");
-  resultEl.textContent = "Przetwarzanie rezerwacji...";
-  try {
-    const res = await fetch("/api/bookings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (res.ok) {
-      resultEl.textContent = `Rezerwacja przyjęta (nr ${data.booking_id}). Potwierdzenie i faktura proforma zostaną wysłane na e-mail.`;
-    } else {
-      resultEl.textContent = `Błąd: ${data.detail || "nieznany"}`;
-    }
-  } catch (err) {
-    resultEl.textContent = "Błąd połączenia z serwerem.";
-  }
-});
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/static/style.css" << 'DAVTRO_EOF'
-@keyframes fadeIn { from { opacity:0; transform:translateY(10px);} to {opacity:1; transform:translateY(0);} }
-.animate-fade-in { animation: fadeIn 0.5s ease-out; }
-.tab-btn.active { background-color:#a855f7; color:#fff; }
-.day.booked { background:#7f1d1d; cursor:not-allowed; opacity:.5; }
-.day.free { background:#334155; cursor:pointer; }
-.day.free:hover { background:#7c3aed; }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/app/templates/index.html" << 'DAVTRO_EOF'
-<!DOCTYPE html>
-<html lang="pl">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Davtro Apartments - Wynajem Krótkoterminowy</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="/static/style.css" />
-</head>
-<body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white min-h-screen">
-
-<header class="border-b border-purple-500/30 backdrop-blur-sm bg-black/20">
-  <div class="container mx-auto px-6 py-6 flex items-center justify-between flex-wrap gap-4">
-    <div class="flex items-center gap-3">
-      <svg class="w-10 h-10 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9.5L12 3l9 6.5V21H3V9.5z"></path>
-      </svg>
-      <h1 class="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-        Davtro Apartments
-      </h1>
-    </div>
-    <nav class="flex gap-4">
-      <button onclick="showTab('offer')" class="tab-btn px-4 py-2 rounded-lg text-purple-300" data-tab="offer">Oferta</button>
-      <button onclick="showTab('booking')" class="tab-btn px-4 py-2 rounded-lg text-purple-300" data-tab="booking">Rezerwacja</button>
-      <button onclick="showTab('contact')" class="tab-btn px-4 py-2 rounded-lg text-purple-300" data-tab="contact">Kontakt</button>
-    </nav>
-  </div>
-</header>
-
-<main class="container mx-auto px-6 py-12">
-
-  <div id="offer-tab" class="tab-content">
-    <div class="space-y-8 animate-fade-in">
-      <div class="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-lg border border-purple-500/20 rounded-2xl p-8">
-        <h2 class="text-4xl font-bold mb-6 text-purple-300">Mieszkania na wynajem krótkoterminowy</h2>
-        <p class="text-lg text-gray-300 leading-relaxed">
-          Komfortowe apartamenty w centrum miasta. Sprawdź dostępność w kalendarzu
-          i zarezerwuj termin online. Po rezerwacji otrzymasz potwierdzenie
-          oraz fakturę proforma na e-mail.
-        </p>
-      </div>
-      <div id="apartments-grid" class="grid md:grid-cols-3 gap-6">
-        <!-- wypełniane przez apartments.js z /api/apartments -->
-      </div>
-    </div>
-  </div>
-
-  <div id="booking-tab" class="tab-content hidden">
-    <div class="space-y-6 animate-fade-in">
-      <h2 class="text-4xl font-bold mb-8 text-purple-300">Rezerwacja</h2>
-      <div class="bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-lg border border-purple-500/20 rounded-xl p-6">
-        <div id="calendar" class="mb-6"></div>
-        <form id="booking-form" class="grid md:grid-cols-2 gap-4">
-          <input type="hidden" id="apartment-id" value="1" />
-          <div>
-            <label class="block text-gray-400 mb-2">Data od</label>
-            <input required type="date" id="date-from" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
-          </div>
-          <div>
-            <label class="block text-gray-400 mb-2">Data do</label>
-            <input required type="date" id="date-to" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
-          </div>
-          <div>
-            <label class="block text-gray-400 mb-2">Imię i nazwisko</label>
-            <input required type="text" id="guest-name" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
-          </div>
-          <div>
-            <label class="block text-gray-400 mb-2">Email</label>
-            <input required type="email" id="guest-email" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
-          </div>
-          <div class="md:col-span-2">
-            <label class="flex items-center gap-2 text-gray-400">
-              <input type="checkbox" id="marketing-consent" />
-              Chcę otrzymywać oferty marketingowe (newsletter)
-            </label>
-          </div>
-          <div class="md:col-span-2">
-            <button type="submit" class="w-full py-3 px-4 rounded-lg bg-purple-500 hover:bg-purple-600 transition-all">
-              Zarezerwuj i wyślij potwierdzenie
-            </button>
-          </div>
-        </form>
-        <p id="booking-result" class="mt-4 text-purple-300"></p>
-      </div>
-    </div>
-  </div>
-
-  <div id="contact-tab" class="tab-content hidden">
-    <div class="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-lg border border-purple-500/20 rounded-2xl p-8">
-      <h2 class="text-4xl font-bold mb-6 text-purple-300">Kontakt</h2>
-      <p class="text-gray-300">Davtro Apartments · biuro@davtro.pl</p>
-    </div>
-  </div>
-
-</main>
-
-<footer class="border-t border-purple-500/30 backdrop-blur-sm bg-black/20 mt-16">
-  <div class="container mx-auto px-6 py-8 text-center text-gray-400">
-    <p>Davtro Apartments © 2026</p>
-  </div>
-</footer>
-
-<script src="/static/script.js"></script>
-</body>
-</html>
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/argocd/application.yaml" << 'DAVTRO_EOF'
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: davtro-website
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/exea-centrum/website-argocd-k8s-github-kustomize.git
-    targetRevision: HEAD
-    path: manifests/production
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: davtro
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/java-app/Dockerfile" << 'DAVTRO_EOF'
-FROM maven:3.9-eclipse-temurin-17 AS build
-WORKDIR /build
-COPY pom.xml .
-COPY src ./src
-RUN mvn -B clean package -DskipTests
-
-FROM eclipse-temurin:17-jre
+cat > apps/fastapi-app/Dockerfile << 'EOF'
+FROM python:3.11-slim
 WORKDIR /app
-COPY --from=build /build/target/*.jar app.jar
-EXPOSE 8081
-ENTRYPOINT ["java","-jar","app.jar"]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/java-app/pom.xml" << 'DAVTRO_EOF'
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+EOF
+
+log_success "FastAPI Application"
+
+# ============================================================================
+# 3. REDIS TO KAFKA BRIDGE
+# ============================================================================
+log_step "Tworzenie Redis to Kafka Bridge..."
+
+cat > apps/redis-to-kafka/main.py << 'EOF'
+from kafka import KafkaProducer
+import redis
+import json
+import os
+import logging
+import time
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-kraft:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "questions")
+
+def main():
+    logger.info("Starting Redis to Kafka bridge...")
+    redis_client = redis.Redis(
+        host=REDIS_HOST, port=REDIS_PORT,
+        password=REDIS_PASSWORD if REDIS_PASSWORD else None,
+        decode_responses=True
+    )
+    for i in range(30):
+        try:
+            redis_client.ping()
+            logger.info("Connected to Redis")
+            break
+        except:
+            logger.info(f"Waiting for Redis... ({i+1}/30)")
+            time.sleep(5)
+    else:
+        logger.error("Failed to connect to Redis")
+        return
+
+    producer = KafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP,
+        value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+        retries=5, acks='all'
+    )
+    logger.info(f"Connected to Kafka: {KAFKA_BOOTSTRAP}")
+
+    count = 0
+    try:
+        while True:
+            message = redis_client.rpop("questions:queue")
+            if message:
+                try:
+                    data = json.loads(message)
+                    future = producer.send(KAFKA_TOPIC, value=data)
+                    meta = future.get(timeout=10)
+                    count += 1
+                    logger.info(f"Sent {data['id']} to Kafka (partition={meta.partition}, offset={meta.offset}) [total: {count}]")
+                except Exception as e:
+                    logger.error(f"Error: {e}")
+                    redis_client.lpush("questions:queue", message)
+                    time.sleep(1)
+            else:
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        producer.close()
+
+if __name__ == "__main__":
+    main()
+EOF
+
+cat > apps/redis-to-kafka/requirements.txt << 'EOF'
+kafka-python==2.0.2
+redis==5.0.1
+EOF
+
+cat > apps/redis-to-kafka/Dockerfile << 'EOF'
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "main.py"]
+EOF
+
+log_success "Redis to Kafka Bridge"
+
+# ============================================================================
+# 4. MESSAGE PROCESSOR (Kafka → PostgreSQL)
+# ============================================================================
+log_step "Tworzenie Message Processor..."
+
+cat > apps/message-processor/main.py << 'EOF'
+from kafka import KafkaConsumer
+import psycopg2
+import json
+import os
+import logging
+import time
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-kraft:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "questions")
+KAFKA_GROUP = os.getenv("KAFKA_GROUP_ID", "question-processor")
+PG_HOST = os.getenv("POSTGRES_HOST", "postgres-db")
+PG_PORT = int(os.getenv("POSTGRES_PORT", 5432))
+PG_DB = os.getenv("POSTGRES_DB", "questions_db")
+PG_USER = os.getenv("POSTGRES_USER", "postgres")
+PG_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
+
+def init_db():
+    try:
+        conn = psycopg2.connect(host=PG_HOST, port=PG_PORT, database=PG_DB, user=PG_USER, password=PG_PASS)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS questions (
+                id VARCHAR(50) PRIMARY KEY,
+                content TEXT NOT NULL,
+                author VARCHAR(255) NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                status VARCHAR(50) DEFAULT 'processed',
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("Database initialized")
+        return True
+    except Exception as e:
+        logger.error(f"DB init failed: {e}")
+        return False
+
+def save_to_postgres(data):
+    try:
+        conn = psycopg2.connect(host=PG_HOST, port=PG_PORT, database=PG_DB, user=PG_USER, password=PG_PASS)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO questions (id, content, author, timestamp, status)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, processed_at = CURRENT_TIMESTAMP
+        """, (data['id'], data['content'], data['author'], data['timestamp'], 'processed'))
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info(f"Saved {data['id']} to PostgreSQL")
+        return True
+    except Exception as e:
+        logger.error(f"Save failed: {e}")
+        return False
+
+def main():
+    logger.info("Starting message processor...")
+    for i in range(30):
+        if init_db():
+            break
+        logger.info(f"Waiting for DB... ({i+1}/30)")
+        time.sleep(5)
+    else:
+        return
+
+    consumer = KafkaConsumer(
+        KAFKA_TOPIC,
+        bootstrap_servers=KAFKA_BOOTSTRAP,
+        group_id=KAFKA_GROUP,
+        auto_offset_reset='earliest',
+        enable_auto_commit=True,
+        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+    )
+    logger.info(f"Connected to Kafka topic: {KAFKA_TOPIC}")
+
+    count = 0
+    try:
+        for message in consumer:
+            try:
+                data = message.value
+                if save_to_postgres(data):
+                    count += 1
+                    logger.info(f"Processed {count} questions")
+            except Exception as e:
+                logger.error(f"Error: {e}")
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        consumer.close()
+
+if __name__ == "__main__":
+    main()
+EOF
+
+cat > apps/message-processor/requirements.txt << 'EOF'
+kafka-python==2.0.2
+psycopg2-binary==2.9.9
+EOF
+
+cat > apps/message-processor/Dockerfile << 'EOF'
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "main.py"]
+EOF
+
+log_success "Message Processor"
+
+# ============================================================================
+# 5. SPRING APP (dodatkowa aplikacja Java)
+# ============================================================================
+log_step "Tworzenie Spring Boot Application..."
+
+mkdir -p apps/spring-app/src/main/java/com/example
+mkdir -p apps/spring-app/src/main/resources
+
+cat > apps/spring-app/pom.xml << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>com.davtro</groupId>
-  <artifactId>spring-app</artifactId>
-  <version>1.0.0</version>
-  <packaging>jar</packaging>
-  <parent>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.3.4</version>
-  </parent>
-  <dependencies>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-web</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-actuator</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-data-jpa</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.postgresql</groupId>
-      <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.kafka</groupId>
-      <artifactId>spring-kafka</artifactId>
-    </dependency>
-  </dependencies>
-  <build>
-    <plugins>
-      <plugin>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>question-viewer</artifactId>
+    <version>1.0.0</version>
+    <parent>
         <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-maven-plugin</artifactId>
-      </plugin>
-    </plugins>
-  </build>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.0</version>
+    </parent>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/java-app/src/main/java/com/davtro/app/SpringAppApplication.java" << 'DAVTRO_EOF'
-package com.davtro.app;
+EOF
+
+cat > apps/spring-app/src/main/java/com/example/QuestionViewerApplication.java << 'EOF'
+package com.example;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
 
-// Rola tego serwisu: panel administracyjny / raportowanie rezerwacji
-// (odczyt z tej samej bazy Postgresql co FastAPI, agregaty do Grafany).
 @SpringBootApplication
-@RestController
-public class SpringAppApplication {
-
+public class QuestionViewerApplication {
     public static void main(String[] args) {
-        SpringApplication.run(SpringAppApplication.class, args);
-    }
-
-    @GetMapping("/actuator/health/custom")
-    public String health() {
-        return "OK";
+        SpringApplication.run(QuestionViewerApplication.class, args);
     }
 }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/java-app/src/main/resources/application.properties" << 'DAVTRO_EOF'
-server.port=8081
-spring.datasource.url=jdbc:postgresql://postgres-clusterip:5432/davtro
-spring.datasource.username=${DB_USER:postgres}
-spring.datasource.password=${DB_PASSWORD:postgres}
-spring.kafka.bootstrap-servers=kafka-kraft:9092
-management.endpoints.web.exposure.include=health,prometheus
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/kyverno-policies/kyverno-policy.yaml" << 'DAVTRO_EOF'
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+EOF
+
+cat > apps/spring-app/src/main/resources/application.properties << 'EOF'
+server.port=8080
+spring.datasource.url=jdbc:postgresql://postgres-db:5432/questions_db
+spring.datasource.username=postgres
+spring.datasource.password=postgres_secure_password
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+management.endpoints.web.exposure.include=health,metrics,prometheus
+EOF
+
+cat > apps/spring-app/Dockerfile << 'EOF'
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline
+COPY src ./src
+RUN mvn package -DskipTests
+
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
+EXPOSE 8080
+CMD ["java", "-jar", "app.jar"]
+EOF
+
+log_success "Spring Boot Application"
+
+# ============================================================================
+# 6. KUBERNETES MANIFESTS - Wszystkie 41 zasobów
+# ============================================================================
+log_step "Tworzenie Kubernetes manifests (wszystkie 41 zasobów)..."
+
+# --- 1. NAMESPACE ---
+cat > k8s/base/00-namespace.yaml << 'EOF'
+apiVersion: v1
+kind: Namespace
 metadata:
-  name: davtro-baseline-policy
-spec:
-  validationFailureAction: Enforce
-  background: true
-  rules:
-    - name: require-ghcr-images
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Obrazy kontenerów w namespace 'davtro' muszą pochodzić z ghcr.io lub zaufanych rejestrów (bitnami, postgres, redis itd. na potrzeby usług pomocniczych)."
-        pattern:
-          spec:
-            containers:
-              - image: "*"
-    - name: require-resource-requests-limits
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Każdy kontener musi mieć zdefiniowane requests/limits."
-        pattern:
-          spec:
-            containers:
-              - resources:
-                  requests:
-                    cpu: "?*"
-                    memory: "?*"
-                  limits:
-                    cpu: "?*"
-                    memory: "?*"
-    - name: disallow-privileged
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Kontenery uprzywilejowane (privileged) są niedozwolone."
-        pattern:
-          spec:
-            =(securityContext):
-              =(privileged): "false"
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/configmap.yaml" << 'DAVTRO_EOF'
+  name: question-system
+  labels:
+    name: question-system
+    monitoring: enabled
+EOF
+
+# --- 2. CONFIGMAPS ---
+cat > k8s/base/01-configmaps.yaml << 'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: fastapi-config
-  namespace: davtro
+  namespace: question-system
 data:
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
   KAFKA_BOOTSTRAP_SERVERS: "kafka-kraft:9092"
-  DATABASE_URL: "postgresql://postgres:postgres@postgres-clusterip:5432/davtro"
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/deployment.yaml" << 'DAVTRO_EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: fastapi-web-app
-  namespace: davtro
-  labels: { app: fastapi-web-app }
-spec:
-  replicas: 2
-  selector:
-    matchLabels: { app: fastapi-web-app }
-  template:
-    metadata:
-      labels: { app: fastapi-web-app }
-    spec:
-      serviceAccountName: davtro-sa
-      containers:
-        - name: fastapi
-          image: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01:latest
-          ports: [{ containerPort: 8080 }]
-          envFrom:
-            - configMapRef: { name: fastapi-config }
-            - secretRef: { name: davtro-secrets }
-          readinessProbe:
-            httpGet: { path: /healthz, port: 8080 }
-            initialDelaySeconds: 5
-          livenessProbe:
-            httpGet: { path: /healthz, port: 8080 }
-            initialDelaySeconds: 15
-          resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { cpu: 500m, memory: 512Mi }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/exporters.yaml" << 'DAVTRO_EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: postgres-exporter
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: postgres-exporter } }
-  template:
-    metadata: { labels: { app: postgres-exporter } }
-    spec:
-      containers:
-        - name: postgres-exporter
-          image: prometheuscommunity/postgres-exporter:v0.15.0
-          env:
-            - name: DATA_SOURCE_NAME
-              value: "postgresql://postgres:postgres@postgres-clusterip:5432/davtro?sslmode=disable"
-          ports: [{ containerPort: 9187 }]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres-exporter
-  namespace: davtro
-spec:
-  selector: { app: postgres-exporter }
-  ports: [{ port: 9187, targetPort: 9187 }]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kafka-exporter
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: kafka-exporter } }
-  template:
-    metadata: { labels: { app: kafka-exporter } }
-    spec:
-      containers:
-        - name: kafka-exporter
-          image: danielqsj/kafka-exporter:v1.7.0
-          args: ["--kafka.server=kafka-kraft:9092"]
-          ports: [{ containerPort: 9308 }]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: kafka-exporter
-  namespace: davtro
-spec:
-  selector: { app: kafka-exporter }
-  ports: [{ port: 9308, targetPort: 9308 }]
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: node-exporter
-  namespace: davtro
-spec:
-  selector: { matchLabels: { app: node-exporter } }
-  template:
-    metadata: { labels: { app: node-exporter } }
-    spec:
-      hostNetwork: true
-      hostPID: true
-      containers:
-        - name: node-exporter
-          image: prom/node-exporter:v1.8.2
-          ports: [{ containerPort: 9100 }]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: node-exporter
-  namespace: davtro
-spec:
-  selector: { app: node-exporter }
-  ports: [{ port: 9100, targetPort: 9100 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/grafana.yaml" << 'DAVTRO_EOF'
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-datasource
-  namespace: davtro
-data:
-  datasource.yaml: |
-    apiVersion: 1
-    datasources:
-      - name: Prometheus
-        type: prometheus
-        url: http://prometheus:9090
-        access: proxy
-        isDefault: true
-      - name: Loki
-        type: loki
-        url: http://loki:3100
-        access: proxy
-      - name: Tempo
-        type: tempo
-        url: http://tempo:3200
-        access: proxy
+  KAFKA_TOPIC: "questions"
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: grafana-dashboards
-  namespace: davtro
+  name: message-processor-config
+  namespace: question-system
 data:
-  davtro-overview.json: |
-    { "title": "Davtro Platform Overview", "panels": [] }
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: grafana
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: grafana } }
-  template:
-    metadata: { labels: { app: grafana } }
-    spec:
-      containers:
-        - name: grafana
-          image: grafana/grafana:11.2.0
-          ports: [{ containerPort: 3000 }]
-          volumeMounts:
-            - { name: datasource, mountPath: /etc/grafana/provisioning/datasources }
-            - { name: dashboards, mountPath: /etc/grafana/provisioning/dashboards-data }
-      volumes:
-        - name: datasource
-          configMap: { name: grafana-datasource }
-        - name: dashboards
-          configMap: { name: grafana-dashboards }
+  POSTGRES_HOST: "postgres-db"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "questions_db"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-kraft:9092"
+  KAFKA_TOPIC: "questions"
+  KAFKA_GROUP_ID: "question-processor"
 ---
 apiVersion: v1
-kind: Service
+kind: ConfigMap
 metadata:
-  name: grafana
-  namespace: davtro
-spec:
-  selector: { app: grafana }
-  ports: [{ port: 3000, targetPort: 3000 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/hpa.yaml" << 'DAVTRO_EOF'
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: fastapi-web-app-hpa
-  namespace: davtro
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: fastapi-web-app
-  minReplicas: 2
-  maxReplicas: 8
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target: { type: Utilization, averageUtilization: 70 }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/ingress.yaml" << 'DAVTRO_EOF'
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: davtro-ingress
-  namespace: davtro
-  annotations:
-    kubernetes.io/ingress.class: "public"
-spec:
-  rules:
-    - host: davtro.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: fastapi-web-app-svc, port: { number: 80 } }
-          - path: /grafana
-            pathType: Prefix
-            backend:
-              service: { name: grafana, port: { number: 3000 } }
-          - path: /kafka-ui
-            pathType: Prefix
-            backend:
-              service: { name: kafka-ui, port: { number: 80 } }
-          - path: /pgadmin
-            pathType: Prefix
-            backend:
-              service: { name: pgadmin, port: { number: 80 } }
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: spark-ingress
-  namespace: davtro
-  annotations:
-    kubernetes.io/ingress.class: "public"
-spec:
-  rules:
-    - host: spark.davtro.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: spark-master-svc, port: { number: 8082 } }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/kafka-ui.yaml" << 'DAVTRO_EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kafka-ui
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: kafka-ui } }
-  template:
-    metadata: { labels: { app: kafka-ui } }
-    spec:
-      containers:
-        - name: kafka-ui
-          image: provectuslabs/kafka-ui:latest
-          env:
-            - { name: KAFKA_CLUSTERS_0_NAME, value: davtro }
-            - { name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS, value: "kafka-kraft:9092" }
-          ports: [{ containerPort: 8080 }]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: kafka-ui
-  namespace: davtro
-spec:
-  selector: { app: kafka-ui }
-  ports: [{ port: 80, targetPort: 8080 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/kafka.yaml" << 'DAVTRO_EOF'
-# Kafka w trybie KRaft (bez Zookeepera) - pojedynczy broker do celów tego projektu.
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: kafka-kraft
-  namespace: davtro
-spec:
-  serviceName: kafka-kraft
-  replicas: 1
-  selector: { matchLabels: { app: kafka-kraft } }
-  template:
-    metadata: { labels: { app: kafka-kraft } }
-    spec:
-      containers:
-        - name: kafka
-          image: bitnami/kafka:3.7
-          ports: [{ containerPort: 9092 }]
-          env:
-            - { name: KAFKA_CFG_NODE_ID, value: "0" }
-            - { name: KAFKA_CFG_PROCESS_ROLES, value: "controller,broker" }
-            - { name: KAFKA_CFG_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093" }
-            - { name: KAFKA_CFG_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka-kraft:9092" }
-            - { name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS, value: "0@kafka-kraft-0.kafka-kraft:9093" }
-            - { name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
-          volumeMounts:
-            - name: kafka-data
-              mountPath: /bitnami/kafka
-  volumeClaimTemplates:
-    - metadata: { name: kafka-data }
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources: { requests: { storage: 5Gi } }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: kafka-kraft
-  namespace: davtro
-spec:
-  clusterIP: None
-  selector: { app: kafka-kraft }
-  ports:
-    - { name: broker, port: 9092, targetPort: 9092 }
-    - { name: controller, port: 9093, targetPort: 9093 }
----
-# Job tworzący tematy Kafka (booking-events, marketing-events) przy starcie.
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: kafka-topic-job
-  namespace: davtro
-spec:
-  template:
-    spec:
-      serviceAccountName: kafka-job-sa
-      restartPolicy: OnFailure
-      containers:
-        - name: kafka-topic-init
-          image: bitnami/kafka:3.7
-          command:
-            - /bin/bash
-            - -c
-            - |
-              kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic booking-events --partitions 3 --replication-factor 1
-              kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic marketing-events --partitions 3 --replication-factor 1
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/kustomization.yaml" << 'DAVTRO_EOF'
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
+  name: redis-to-kafka-config
+  namespace: question-system
+data:
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-kraft:9092"
+  KAFKA_TOPIC: "questions"
+EOF
 
-resources:
-  - namespace.yaml
-  - serviceaccount.yaml
-  - configmap.yaml
-  - secret.yaml
-  - deployment.yaml
-  - service.yaml
-  - hpa.yaml
-  - pdb.yaml
-  - postgres.yaml
-  - redis.yaml
-  - vault.yaml
-  - kafka.yaml
-  - message-processor.yaml
-  - spring-app.yaml
-  - spark.yaml
-  - prometheus.yaml
-  - exporters.yaml
-  # service-monitors.yaml wymaga Prometheus Operatora (CRD) - odkomentuj, jeśli zainstalowany
-  # - service-monitors.yaml
-  - grafana.yaml
-  - loki.yaml
-  - promtail.yaml
-  - tempo.yaml
-  - pgadmin.yaml
-  - kafka-ui.yaml
-  - network-policies.yaml
-  - ingress.yaml
-  - kyverno-policy.yaml
+# --- 3. SECRETS ---
+cat > k8s/base/02-secrets.yaml << 'EOF'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+  namespace: question-system
+type: Opaque
+stringData:
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "postgres_secure_password"
+  POSTGRES_DB: "questions_db"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-credentials
+  namespace: question-system
+type: Opaque
+stringData:
+  REDIS_PASSWORD: "redis_secure_password"
+EOF
 
-images:
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
-    newTag: latest
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/kyverno-policy.yaml" << 'DAVTRO_EOF'
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: davtro-baseline-policy
-spec:
-  validationFailureAction: Enforce
-  background: true
-  rules:
-    - name: require-ghcr-images
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Obrazy kontenerów w namespace 'davtro' muszą pochodzić z ghcr.io lub zaufanych rejestrów (bitnami, postgres, redis itd. na potrzeby usług pomocniczych)."
-        pattern:
-          spec:
-            containers:
-              - image: "*"
-    - name: require-resource-requests-limits
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Każdy kontener musi mieć zdefiniowane requests/limits."
-        pattern:
-          spec:
-            containers:
-              - resources:
-                  requests:
-                    cpu: "?*"
-                    memory: "?*"
-                  limits:
-                    cpu: "?*"
-                    memory: "?*"
-    - name: disallow-privileged
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Kontenery uprzywilejowane (privileged) są niedozwolone."
-        pattern:
-          spec:
-            =(securityContext):
-              =(privileged): "false"
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/loki.yaml" << 'DAVTRO_EOF'
+# --- 4. SERVICE ACCOUNTS ---
+cat > k8s/base/03-serviceaccounts.yaml << 'EOF'
 apiVersion: v1
-kind: ConfigMap
+kind: ServiceAccount
 metadata:
-  name: loki-config
-  namespace: davtro
-data:
-  loki-config.yaml: |
-    auth_enabled: false
-    server: { http_listen_port: 3100 }
-    schema_config:
-      configs:
-        - from: 2024-01-01
-          store: boltdb-shipper
-          object_store: filesystem
-          schema: v12
-          index: { prefix: index_, period: 24h }
-    storage_config:
-      filesystem: { directory: /loki/chunks }
+  name: kafka-job-sa
+  namespace: question-system
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: question-system-sa
+  namespace: question-system
+EOF
+
+# --- 9 & 10. POSTGRES DB + CLUSTERIP ---
+cat > k8s/base/04-postgres.yaml << 'EOF'
 apiVersion: apps/v1
 kind: Deployment
-metadata:
-  name: loki
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: loki } }
-  template:
-    metadata: { labels: { app: loki } }
-    spec:
-      containers:
-        - name: loki
-          image: grafana/loki:3.1.1
-          args: ["-config.file=/etc/loki/loki-config.yaml"]
-          ports: [{ containerPort: 3100 }]
-          volumeMounts:
-            - { name: config, mountPath: /etc/loki }
-      volumes:
-        - name: config
-          configMap: { name: loki-config }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: loki
-  namespace: davtro
-spec:
-  selector: { app: loki }
-  ports: [{ port: 3100, targetPort: 3100 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/message-processor.yaml" << 'DAVTRO_EOF'
-# Konsument Kafka: booking-events + marketing-events -> e-mail + aktualizacja Postgresql.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: message-processor
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: message-processor } }
-  template:
-    metadata: { labels: { app: message-processor } }
-    spec:
-      serviceAccountName: davtro-sa
-      containers:
-        - name: message-processor
-          image: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer:latest
-          envFrom:
-            - configMapRef: { name: fastapi-config }
-            - secretRef: { name: davtro-secrets }
-          resources:
-            requests: { cpu: 100m, memory: 128Mi }
-            limits: { cpu: 300m, memory: 256Mi }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/namespace.yaml" << 'DAVTRO_EOF'
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: davtro
-  labels:
-    app.kubernetes.io/part-of: davtro-platform
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/network-policies.yaml" << 'DAVTRO_EOF'
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: default-deny-ingress
-  namespace: davtro
-spec:
-  podSelector: {}
-  policyTypes: [Ingress]
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-intra-namespace
-  namespace: davtro
-spec:
-  podSelector: {}
-  ingress:
-    - from: [{ podSelector: {} }]
-  policyTypes: [Ingress]
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-ingress-to-web
-  namespace: davtro
-spec:
-  podSelector: { matchLabels: { app: fastapi-web-app } }
-  ingress:
-    - from: []
-      ports: [{ protocol: TCP, port: 8080 }]
-  policyTypes: [Ingress]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/pdb.yaml" << 'DAVTRO_EOF'
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: fastapi-web-app-pdb
-  namespace: davtro
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels: { app: fastapi-web-app }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/pgadmin.yaml" << 'DAVTRO_EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: pgadmin
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: pgadmin } }
-  template:
-    metadata: { labels: { app: pgadmin } }
-    spec:
-      containers:
-        - name: pgadmin
-          image: dpage/pgadmin4:8
-          env:
-            - { name: PGADMIN_DEFAULT_EMAIL, value: admin@davtro.pl }
-            - name: PGADMIN_DEFAULT_PASSWORD
-              valueFrom: { secretKeyRef: { name: davtro-secrets, key: DB_PASSWORD } }
-          ports: [{ containerPort: 80 }]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: pgadmin
-  namespace: davtro
-spec:
-  selector: { app: pgadmin }
-  ports: [{ port: 80, targetPort: 80 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/postgres.yaml" << 'DAVTRO_EOF'
-apiVersion: apps/v1
-kind: StatefulSet
 metadata:
   name: postgres-db
-  namespace: davtro
+  namespace: question-system
 spec:
-  serviceName: postgres-clusterip
   replicas: 1
   selector:
-    matchLabels: { app: postgres-db }
+    matchLabels:
+      app: postgres-db
   template:
     metadata:
-      labels: { app: postgres-db }
+      labels:
+        app: postgres-db
     spec:
       containers:
-        - name: postgres
-          image: postgres:16-alpine
-          ports: [{ containerPort: 5432 }]
-          env:
-            - name: POSTGRES_DB
-              value: davtro
-            - name: POSTGRES_USER
-              valueFrom: { secretKeyRef: { name: davtro-secrets, key: DB_USER } }
-            - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: davtro-secrets, key: DB_PASSWORD } }
-          volumeMounts:
-            - name: pgdata
-              mountPath: /var/lib/postgresql/data
-  volumeClaimTemplates:
-    - metadata: { name: pgdata }
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources: { requests: { storage: 5Gi } }
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_DB
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 30
+          periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: postgres-clusterip
-  namespace: davtro
-spec:
-  clusterIP: None
-  selector: { app: postgres-db }
-  ports: [{ port: 5432, targetPort: 5432 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/prometheus.yaml" << 'DAVTRO_EOF'
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-  namespace: davtro
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-    scrape_configs:
-      - job_name: fastapi
-        static_configs: [{ targets: ["fastapi-web-app-svc:80"] }]
-      - job_name: postgres-exporter
-        static_configs: [{ targets: ["postgres-exporter:9187"] }]
-      - job_name: kafka-exporter
-        static_configs: [{ targets: ["kafka-exporter:9308"] }]
-      - job_name: node-exporter
-        static_configs: [{ targets: ["node-exporter:9100"] }]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prometheus
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: prometheus } }
-  template:
-    metadata: { labels: { app: prometheus } }
-    spec:
-      containers:
-        - name: prometheus
-          image: prom/prometheus:v2.54.1
-          args: ["--config.file=/etc/prometheus/prometheus.yml"]
-          ports: [{ containerPort: 9090 }]
-          volumeMounts:
-            - { name: config, mountPath: /etc/prometheus }
-      volumes:
-        - name: config
-          configMap: { name: prometheus-config }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus
-  namespace: davtro
-spec:
-  selector: { app: prometheus }
-  ports: [{ port: 9090, targetPort: 9090 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/promtail.yaml" << 'DAVTRO_EOF'
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: promtail-config
-  namespace: davtro
-data:
-  promtail.yaml: |
-    server: { http_listen_port: 9080 }
-    clients: [{ url: http://loki:3100/loki/api/v1/push }]
-    scrape_configs:
-      - job_name: kubernetes-pods
-        kubernetes_sd_configs: [{ role: pod }]
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: promtail
-  namespace: davtro
-spec:
-  selector: { matchLabels: { app: promtail } }
-  template:
-    metadata: { labels: { app: promtail } }
-    spec:
-      serviceAccountName: davtro-sa
-      containers:
-        - name: promtail
-          image: grafana/promtail:3.1.1
-          args: ["-config.file=/etc/promtail/promtail.yaml"]
-          volumeMounts:
-            - { name: config, mountPath: /etc/promtail }
-            - { name: varlog, mountPath: /var/log }
-      volumes:
-        - name: config
-          configMap: { name: promtail-config }
-        - name: varlog
-          hostPath: { path: /var/log }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/redis.yaml" << 'DAVTRO_EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-  namespace: davtro
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: redis } }
-  template:
-    metadata: { labels: { app: redis } }
-    spec:
-      containers:
-        - name: redis
-          image: redis:7-alpine
-          ports: [{ containerPort: 6379 }]
-          resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: 250m, memory: 256Mi }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: davtro
-spec:
-  selector: { app: redis }
-  ports: [{ port: 6379, targetPort: 6379 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/secret.yaml" << 'DAVTRO_EOF'
-# UWAGA: To jest placeholder. W realnym środowisku wartości mają być
-# wstrzykiwane przez Vault (ArgoCD Vault Plugin), NIE trzymane w repo.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: davtro-secrets
-  namespace: davtro
-type: Opaque
-stringData:
-  DB_USER: "<path:secret/data/davtro#db_user>"
-  DB_PASSWORD: "<path:secret/data/davtro#db_password>"
-  SMTP_USER: "<path:secret/data/davtro#smtp_user>"
-  SMTP_PASSWORD: "<path:secret/data/davtro#smtp_password>"
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/service-monitors.yaml" << 'DAVTRO_EOF'
-# Wymaga Prometheus Operatora (CRD ServiceMonitor). Jeśli używasz "gołego" Prometheusa
-# jak w prometheus.yaml, ten plik można pominąć w kustomization.yaml.
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: davtro-services
-  namespace: davtro
-  labels: { release: prometheus }
+  namespace: question-system
 spec:
   selector:
-    matchExpressions:
-      - { key: app, operator: In, values: [fastapi-web-app, postgres-exporter, kafka-exporter] }
-  endpoints:
-    - port: metrics
-      interval: 15s
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/service.yaml" << 'DAVTRO_EOF'
+    app: postgres-db
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+EOF
+
+# --- 11. REDIS ---
+cat > k8s/base/05-redis.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        command: ["redis-server", "--requirepass", "$(REDIS_PASSWORD)"]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: REDIS_PASSWORD
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: fastapi-web-app-svc
-  namespace: davtro
+  name: redis
+  namespace: question-system
 spec:
-  selector: { app: fastapi-web-app }
+  selector:
+    app: redis
   ports:
-    - port: 80
-      targetPort: 8080
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/serviceaccount.yaml" << 'DAVTRO_EOF'
-apiVersion: v1
-kind: ServiceAccount
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+EOF
+
+# --- 12. VAULT ---
+cat > k8s/base/06-vault.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: davtro-sa
-  namespace: davtro
+  name: vault
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+    spec:
+      containers:
+      - name: vault
+        image: hashicorp/vault:1.15
+        ports:
+        - containerPort: 8200
+        env:
+        - name: VAULT_DEV_ROOT_TOKEN_ID
+          value: "root"
+        - name: VAULT_DEV_LISTEN_ADDRESS
+          value: "0.0.0.0:8200"
+        - name: VAULT_ADDR
+          value: "http://127.0.0.1:8200"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
 ---
 apiVersion: v1
-kind: ServiceAccount
+kind: Service
 metadata:
-  name: kafka-job-sa
-  namespace: davtro
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/spark.yaml" << 'DAVTRO_EOF'
+  name: vault
+  namespace: question-system
+spec:
+  selector:
+    app: vault
+  ports:
+  - port: 8200
+    targetPort: 8200
+  type: ClusterIP
+EOF
+
+# --- 13. KAFKA KRAFT ---
+cat > k8s/base/07-kafka.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-kraft
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-kraft
+  template:
+    metadata:
+      labels:
+        app: kafka-kraft
+    spec:
+      containers:
+      - name: kafka
+        image: bitnami/kafka:3.6
+        ports:
+        - containerPort: 9092
+        - containerPort: 9093
+        env:
+        - name: KAFKA_ENABLE_KRAFT
+          value: "yes"
+        - name: KAFKA_CFG_PROCESS_ROLES
+          value: "broker,controller"
+        - name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES
+          value: "CONTROLLER"
+        - name: KAFKA_CFG_LISTENERS
+          value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+        - name: KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+        - name: KAFKA_CFG_ADVERTISED_LISTENERS
+          value: "PLAINTEXT://kafka-kraft:9092"
+        - name: KAFKA_CFG_BROKER_ID
+          value: "1"
+        - name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS
+          value: "1@kafka-kraft:9093"
+        - name: ALLOW_PLAINTEXT_LISTENER
+          value: "yes"
+        - name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE
+          value: "true"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-kraft
+  namespace: question-system
+spec:
+  selector:
+    app: kafka-kraft
+  ports:
+  - name: kafka
+    port: 9092
+    targetPort: 9092
+  - name: controller
+    port: 9093
+    targetPort: 9093
+  type: ClusterIP
+EOF
+
+# --- 15. KAFKA TOPIC JOB ---
+cat > k8s/base/08-kafka-topic-job.yaml << 'EOF'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topic-job
+  namespace: question-system
+spec:
+  template:
+    spec:
+      serviceAccountName: kafka-job-sa
+      containers:
+      - name: kafka-topic-creator
+        image: bitnami/kafka:3.6
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Waiting for Kafka..."
+          sleep 30
+          kafka-topics.sh --create \
+            --bootstrap-server kafka-kraft:9092 \
+            --replication-factor 1 \
+            --partitions 3 \
+            --topic questions \
+            --if-not-exists
+          echo "Topic created"
+          kafka-topics.sh --list --bootstrap-server kafka-kraft:9092
+      restartPolicy: Never
+  backoffLimit: 4
+EOF
+
+# --- 5, 16, 17. DEPLOYMENTS: FastAPI, Message Processor, Redis-to-Kafka ---
+cat > k8s/base/09-app-deployments.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-app
+  namespace: question-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fastapi-app
+  template:
+    metadata:
+      labels:
+        app: fastapi-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      serviceAccountName: question-system-sa
+      containers:
+      - name: fastapi
+        image: fastapi-app:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: fastapi-config
+        - secretRef:
+            name: redis-credentials
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: message-processor
+  namespace: question-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: message-processor
+  template:
+    metadata:
+      labels:
+        app: message-processor
+    spec:
+      serviceAccountName: question-system-sa
+      containers:
+      - name: processor
+        image: message-processor:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: message-processor-config
+        - secretRef:
+            name: postgres-credentials
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-to-kafka
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-to-kafka
+  template:
+    metadata:
+      labels:
+        app: redis-to-kafka
+    spec:
+      serviceAccountName: question-system-sa
+      containers:
+      - name: bridge
+        image: redis-to-kafka:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: redis-to-kafka-config
+        - secretRef:
+            name: redis-credentials
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-service
+  namespace: question-system
+spec:
+  selector:
+    app: fastapi-app
+  ports:
+  - port: 80
+    targetPort: 8000
+  type: ClusterIP
+EOF
+
+# --- 18 & 19. SPARK MASTER & WORKER ---
+cat > k8s/base/10-spark.yaml << 'EOF'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: spark-master
-  namespace: davtro
+  namespace: question-system
 spec:
   replicas: 1
-  selector: { matchLabels: { app: spark-master } }
+  selector:
+    matchLabels:
+      app: spark-master
   template:
-    metadata: { labels: { app: spark-master } }
+    metadata:
+      labels:
+        app: spark-master
     spec:
       containers:
-        - name: spark-master
-          image: bitnami/spark:3.5
-          command: ["/opt/bitnami/spark/sbin/start-master.sh"]
-          ports: [{ containerPort: 7077 }, { containerPort: 8082 }]
+      - name: spark-master
+        image: bitnami/spark:3.5
+        ports:
+        - containerPort: 7077
+        - containerPort: 8080
+        env:
+        - name: SPARK_MODE
+          value: "master"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: spark-master-svc
-  namespace: davtro
+  name: spark-master
+  namespace: question-system
 spec:
-  selector: { app: spark-master }
+  selector:
+    app: spark-master
   ports:
-    - { name: rpc, port: 7077, targetPort: 7077 }
-    - { name: ui, port: 8082, targetPort: 8082 }
+  - name: ui
+    port: 8080
+    targetPort: 8080
+  - name: master
+    port: 7077
+    targetPort: 7077
+  type: ClusterIP
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: spark-worker
-  namespace: davtro
+  namespace: question-system
 spec:
   replicas: 2
-  selector: { matchLabels: { app: spark-worker } }
+  selector:
+    matchLabels:
+      app: spark-worker
   template:
-    metadata: { labels: { app: spark-worker } }
+    metadata:
+      labels:
+        app: spark-worker
     spec:
       containers:
-        - name: spark-worker
-          image: bitnami/spark:3.5
-          command: ["/opt/bitnami/spark/sbin/start-worker.sh", "spark://spark-master-svc:7077"]
-          env:
-            - { name: SPARK_WORKER_CORES, value: "1" }
-            - { name: SPARK_WORKER_MEMORY, value: "1g" }
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/spring-app.yaml" << 'DAVTRO_EOF'
+      - name: spark-worker
+        image: bitnami/spark:3.5
+        ports:
+        - containerPort: 8081
+        env:
+        - name: SPARK_MODE
+          value: "worker"
+        - name: SPARK_MASTER_URL
+          value: "spark://spark-master:7077"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+EOF
+
+# --- 20. SPRING APP DEPLOYMENT ---
+cat > k8s/base/11-spring-app.yaml << 'EOF'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: spring-app-deployment
-  namespace: davtro
+  namespace: question-system
 spec:
   replicas: 1
-  selector: { matchLabels: { app: spring-app } }
+  selector:
+    matchLabels:
+      app: spring-app
   template:
-    metadata: { labels: { app: spring-app } }
+    metadata:
+      labels:
+        app: spring-app
     spec:
       containers:
-        - name: spring-app
-          image: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring:latest
-          ports: [{ containerPort: 8081 }]
-          envFrom:
-            - secretRef: { name: davtro-secrets }
-          resources:
-            requests: { cpu: 200m, memory: 256Mi }
-            limits: { cpu: 500m, memory: 512Mi }
+      - name: spring-app
+        image: spring-app:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:postgresql://postgres-db:5432/questions_db"
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_USER
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_PASSWORD
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: spring-app-svc
-  namespace: davtro
+  name: spring-app-service
+  namespace: question-system
 spec:
-  selector: { app: spring-app }
-  ports: [{ port: 80, targetPort: 8081 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/tempo.yaml" << 'DAVTRO_EOF'
+  selector:
+    app: spring-app
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+EOF
+
+# --- 7 & 8. HPA & PDB ---
+cat > k8s/base/12-hpa-pdb.yaml << 'EOF'
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-hpa
+  namespace: question-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fastapi-pdb
+  namespace: question-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: fastapi-app
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: message-processor-pdb
+  namespace: question-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: message-processor
+EOF
+
+# --- 38. NETWORK POLICIES ---
+cat > k8s/policies/13-network-policies.yaml << 'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: network-policies
+  namespace: question-system
+spec:
+  podSelector:
+    matchLabels:
+      app: fastapi-app
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka-kraft
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: message-processor-policy
+  namespace: question-system
+spec:
+  podSelector:
+    matchLabels:
+      app: message-processor
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka-kraft
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres-db
+EOF
+
+# --- 39 & 40. INGRESS ---
+cat > k8s/base/14-ingress.yaml << 'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress
+  namespace: question-system
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: questions.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: fastapi-service
+            port:
+              number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: spark-ingress
+  namespace: question-system
+spec:
+  rules:
+  - host: spark.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: spark-master
+            port:
+              number: 8080
+EOF
+
+# --- 41. KYVERNO POLICY ---
+cat > k8s/policies/15-kyverno-policy.yaml << 'EOF'
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kyverno-policy
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/description: >-
+      Require all containers to have resource limits defined
+spec:
+  validationFailureAction: Audit
+  rules:
+  - name: require-resource-limits
+    match:
+      resources:
+        kinds:
+        - Pod
+        namespaces:
+        - question-system
+    validate:
+      message: "CPU and memory limits are required."
+      pattern:
+        spec:
+          containers:
+          - resources:
+              limits:
+                memory: "?*"
+                cpu: "?*"
+EOF
+
+# ============================================================================
+# MONITORING STACK
+# ============================================================================
+log_step "Tworzenie Monitoring Stack..."
+
+# --- 21 & 26. PROMETHEUS CONFIG + DEPLOYMENT ---
+cat > k8s/monitoring/16-prometheus.yaml << 'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: question-system
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    scrape_configs:
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - question-system
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: question-system-sa
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        ports:
+        - containerPort: 9090
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: question-system
+spec:
+  selector:
+    app: prometheus
+  ports:
+  - port: 9090
+    targetPort: 9090
+  type: ClusterIP
+EOF
+
+# --- 25. SERVICE MONITORS ---
+cat > k8s/monitoring/17-service-monitors.yaml << 'EOF'
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: service-monitors
+  namespace: question-system
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: fastapi-app
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 15s
+EOF
+
+# --- 22. POSTGRES EXPORTER ---
+cat > k8s/monitoring/18-postgres-exporter.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+    spec:
+      containers:
+      - name: exporter
+        image: prometheuscommunity/postgres-exporter:latest
+        ports:
+        - containerPort: 9187
+        env:
+        - name: DATA_SOURCE_NAME
+          value: "postgresql://postgres:postgres_secure_password@postgres-db:5432/questions_db?sslmode=disable"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: question-system
+  labels:
+    app: postgres-exporter
+spec:
+  selector:
+    app: postgres-exporter
+  ports:
+  - port: 9187
+    targetPort: 9187
+  type: ClusterIP
+EOF
+
+# --- 23. KAFKA EXPORTER ---
+cat > k8s/monitoring/19-kafka-exporter.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-exporter
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-exporter
+  template:
+    metadata:
+      labels:
+        app: kafka-exporter
+    spec:
+      containers:
+      - name: exporter
+        image: danielqsj/kafka-exporter:latest
+        args:
+        - --kafka.server=kafka-kraft:9092
+        ports:
+        - containerPort: 9308
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter
+  namespace: question-system
+  labels:
+    app: kafka-exporter
+spec:
+  selector:
+    app: kafka-exporter
+  ports:
+  - port: 9308
+    targetPort: 9308
+  type: ClusterIP
+EOF
+
+# --- 24. NODE EXPORTER ---
+cat > k8s/monitoring/20-node-exporter.yaml << 'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: question-system
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      hostPID: true
+      hostNetwork: true
+      containers:
+      - name: node-exporter
+        image: prom/node-exporter:latest
+        ports:
+        - containerPort: 9100
+          hostPort: 9100
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: question-system
+spec:
+  selector:
+    app: node-exporter
+  ports:
+  - port: 9100
+    targetPort: 9100
+  type: ClusterIP
+EOF
+
+# --- 27, 28, 29. GRAFANA ---
+cat > k8s/monitoring/21-grafana.yaml << 'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource
+  namespace: question-system
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      url: http://prometheus:9090
+      access: proxy
+      isDefault: true
+    - name: Loki
+      type: loki
+      url: http://loki:3100
+    - name: Tempo
+      type: tempo
+      url: http://tempo:3200
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: question-system
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      updateIntervalSeconds: 10
+      options:
+        path: /var/lib/grafana/dashboards
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "admin"
+        volumeMounts:
+        - name: datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: dashboards-config
+          mountPath: /etc/grafana/provisioning/dashboards
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: datasources
+        configMap:
+          name: grafana-datasource
+      - name: dashboards-config
+        configMap:
+          name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: question-system
+spec:
+  selector:
+    app: grafana
+  ports:
+  - port: 3000
+    targetPort: 3000
+  type: ClusterIP
+EOF
+
+# --- 30 & 31. LOKI ---
+cat > k8s/monitoring/22-loki.yaml << 'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: question-system
+data:
+  loki.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    ingester:
+      lifecycler:
+        address: 127.0.0.1
+        ring:
+          kvstore:
+            store: inmemory
+          replication_factor: 1
+    schema_config:
+      configs:
+      - from: 2020-10-24
+        store: boltdb-shipper
+        object_store: filesystem
+        schema: v11
+        index:
+          prefix: index_
+          period: 24h
+    storage_config:
+      boltdb_shipper:
+        active_index_directory: /loki/boltdb-shipper-active
+        cache_location: /loki/boltdb-shipper-cache
+        shared_store: filesystem
+      filesystem:
+        directory: /loki/chunks
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      containers:
+      - name: loki
+        image: grafana/loki:latest
+        ports:
+        - containerPort: 3100
+        args:
+        - -config.file=/etc/loki/loki.yaml
+        volumeMounts:
+        - name: config
+          mountPath: /etc/loki
+        - name: storage
+          mountPath: /loki
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: loki-config
+      - name: storage
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: question-system
+spec:
+  selector:
+    app: loki
+  ports:
+  - port: 3100
+    targetPort: 3100
+  type: ClusterIP
+EOF
+
+# --- 32 & 33. PROMTAIL ---
+cat > k8s/monitoring/23-promtail.yaml << 'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: question-system
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+    positions:
+      filename: /tmp/positions.yaml
+    clients:
+    - url: http://loki:3100/loki/api/v1/push
+    scrape_configs:
+    - job_name: kubernetes-pods
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - question-system
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: container
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: question-system
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      containers:
+      - name: promtail
+        image: grafana/promtail:latest
+        args:
+        - -config.file=/etc/promtail/promtail.yaml
+        volumeMounts:
+        - name: config
+          mountPath: /etc/promtail
+        - name: logs
+          mountPath: /var/log
+          readOnly: true
+        - name: containers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      volumes:
+      - name: config
+        configMap:
+          name: promtail-config
+      - name: logs
+        hostPath:
+          path: /var/log
+      - name: containers
+        hostPath:
+          path: /var/lib/docker/containers
+EOF
+
+# --- 34 & 35. TEMPO ---
+cat > k8s/monitoring/24-tempo.yaml << 'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: tempo-config
-  namespace: davtro
+  namespace: question-system
 data:
   tempo.yaml: |
-    server: { http_listen_port: 3200 }
+    server:
+      http_listen_port: 3200
     distributor:
       receivers:
         otlp:
-          protocols: { http: {}, grpc: {} }
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
     storage:
-      trace: { backend: local, local: { path: /tmp/tempo/traces } }
+      trace:
+        backend: local
+        local:
+          path: /tmp/tempo/blocks
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tempo
-  namespace: davtro
+  namespace: question-system
 spec:
   replicas: 1
-  selector: { matchLabels: { app: tempo } }
+  selector:
+    matchLabels:
+      app: tempo
   template:
-    metadata: { labels: { app: tempo } }
+    metadata:
+      labels:
+        app: tempo
     spec:
       containers:
-        - name: tempo
-          image: grafana/tempo:2.6.0
-          args: ["-config.file=/etc/tempo/tempo.yaml"]
-          ports: [{ containerPort: 3200 }]
-          volumeMounts:
-            - { name: config, mountPath: /etc/tempo }
-      volumes:
+      - name: tempo
+        image: grafana/tempo:latest
+        ports:
+        - containerPort: 3200
+        - containerPort: 4317
+        - containerPort: 4318
+        args:
+        - -config.file=/etc/tempo/tempo.yaml
+        volumeMounts:
         - name: config
-          configMap: { name: tempo-config }
+          mountPath: /etc/tempo
+        - name: storage
+          mountPath: /tmp/tempo
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: tempo-config
+      - name: storage
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: tempo
-  namespace: davtro
+  namespace: question-system
 spec:
-  selector: { app: tempo }
-  ports: [{ port: 3200, targetPort: 3200 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/base/vault.yaml" << 'DAVTRO_EOF'
-# Minimalna instancja Vault (dev-mode) do integracji z ArgoCD Vault Plugin.
-# W produkcji: użyj oficjalnego Helm chartu HashiCorp Vault (HA + auto-unseal),
-# tu podana jest wersja uproszczona zgodna z resztą manifestów Kustomize.
+  selector:
+    app: tempo
+  ports:
+  - name: http
+    port: 3200
+    targetPort: 3200
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+  type: ClusterIP
+EOF
+
+# ============================================================================
+# TOOLS: pgAdmin & Kafka UI
+# ============================================================================
+log_step "Tworzenie Tools (pgAdmin, Kafka UI)..."
+
+cat > k8s/tools/25-pgadmin.yaml << 'EOF'
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
-  name: vault
-  namespace: davtro
+  name: pgadmin
+  namespace: question-system
 spec:
-  serviceName: vault
   replicas: 1
-  selector: { matchLabels: { app: vault } }
+  selector:
+    matchLabels:
+      app: pgadmin
   template:
-    metadata: { labels: { app: vault } }
+    metadata:
+      labels:
+        app: pgadmin
     spec:
-      serviceAccountName: davtro-sa
       containers:
-        - name: vault
-          image: hashicorp/vault:1.17
-          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
-          ports: [{ containerPort: 8200 }]
-          env:
-            - name: VAULT_DEV_ROOT_TOKEN_ID
-              valueFrom: { secretKeyRef: { name: davtro-secrets, key: VAULT_ROOT_TOKEN, optional: true } }
+      - name: pgadmin
+        image: dpage/pgadmin4:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: PGADMIN_DEFAULT_EMAIL
+          value: "admin@example.com"
+        - name: PGADMIN_DEFAULT_PASSWORD
+          value: "admin"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: vault
-  namespace: davtro
+  name: pgadmin
+  namespace: question-system
 spec:
-  selector: { app: vault }
-  ports: [{ port: 8200, targetPort: 8200 }]
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/manifests/production/kustomization.yaml" << 'DAVTRO_EOF'
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
+  selector:
+    app: pgadmin
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+EOF
 
-namespace: davtro
+cat > k8s/tools/26-kafka-ui.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: question-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-ui
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+    spec:
+      containers:
+      - name: kafka-ui
+        image: provectuslabs/kafka-ui:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: KAFKA_CLUSTERS_0_NAME
+          value: "local"
+        - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+          value: "kafka-kraft:9092"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: question-system
+spec:
+  selector:
+    app: kafka-ui
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+EOF
 
-resources:
-  - ../base
+# ============================================================================
+# HELPER SCRIPTS
+# ============================================================================
+log_step "Tworzenie skryptów pomocniczych..."
 
-images:
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
-    newTag: latest
+cat > scripts/build-images.sh << 'EOF'
+#!/bin/bash
+echo "🔨 Budowanie obrazów Docker..."
+docker build -t fastapi-app:latest ../apps/fastapi-app
+docker build -t message-processor:latest ../apps/message-processor
+docker build -t redis-to-kafka:latest ../apps/redis-to-kafka
+echo "✅ Obrazy zbudowane"
+docker images | grep -E "fastapi-app|message-processor|redis-to-kafka"
+EOF
+chmod +x scripts/build-images.sh
 
-replicas:
-  - name: fastapi-web-app
-    count: 3
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/spark-jobs/Dockerfile" << 'DAVTRO_EOF'
-FROM bitnami/spark:3.5
-WORKDIR /jobs
-COPY marketing_analytics.py .
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/spark-jobs/marketing_analytics.py" << 'DAVTRO_EOF'
-"""
-Spark job: agregacja zdarzen z tematu Kafka 'marketing-events'
-(np. liczba zgod marketingowych dziennie) i zapis wynikow do Postgresql,
-skad Grafana/Spring-app moga je pokazac.
-Uruchamiane cyklicznie na spark-master/spark-worker (spark-submit) lub jako CronJob.
-"""
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, window, count
-from pyspark.sql.types import StructType, StringType
+cat > scripts/deploy.sh << 'EOF'
+#!/bin/bash
+echo "🚀 Deployment do Kubernetes..."
+kubectl cluster-info || { echo "❌ Brak połączenia z K8s"; exit 1; }
+for file in ../k8s/base/*.yaml ../k8s/monitoring/*.yaml ../k8s/tools/*.yaml ../k8s/policies/*.yaml; do
+    echo "Aplikowanie $file..."
+    kubectl apply -f "$file"
+    sleep 1
+done
+echo "✅ Deployment zakończony"
+kubectl get pods -n question-system
+EOF
+chmod +x scripts/deploy.sh
 
-KAFKA_BOOTSTRAP = "kafka-kraft:9092"
-JDBC_URL = "jdbc:postgresql://postgres-clusterip:5432/davtro"
+cat > scripts/cleanup.sh << 'EOF'
+#!/bin/bash
+echo "🧹 Czyszczenie..."
+read -p "Usunąć namespace question-system? (y/n): " confirm
+if [ "$confirm" = "y" ]; then
+    kubectl delete namespace question-system
+    echo "✅ Wyczyszczono"
+fi
+EOF
+chmod +x scripts/cleanup.sh
 
-schema = StructType() \
-    .add("event_id", StringType()) \
-    .add("guest_email", StringType()) \
-    .add("guest_name", StringType()) \
-    .add("type", StringType())
+cat > scripts/port-forward.sh << 'EOF'
+#!/bin/bash
+echo "🔌 Port forwarding..."
+echo "FastAPI:     http://localhost:8000"
+echo "Grafana:     http://localhost:3000 (admin/admin)"
+echo "Prometheus:  http://localhost:9090"
+echo "Kafka UI:    http://localhost:9090"
+echo "pgAdmin:     http://localhost:5050 (admin@example.com/admin)"
+echo "Spark UI:    http://localhost:8080"
+echo "Vault:       http://localhost:8200 (token: root)"
+echo ""
+kubectl port-forward svc/fastapi-service 8000:80 -n question-system &
+kubectl port-forward svc/grafana 3000:3000 -n question-system &
+kubectl port-forward svc/prometheus 9090:9090 -n question-system &
+kubectl port-forward svc/kafka-ui 9091:8080 -n question-system &
+kubectl port-forward svc/pgadmin 5050:80 -n question-system &
+kubectl port-forward svc/spark-master 8081:8080 -n question-system &
+kubectl port-forward svc/vault 8200:8200 -n question-system &
+wait
+EOF
+chmod +x scripts/port-forward.sh
 
-if __name__ == "__main__":
-    spark = SparkSession.builder.appName("marketing-analytics").getOrCreate()
+# ============================================================================
+# README
+# ============================================================================
+cat > README.md << 'EOF'
+# 🎓 System Przetwarzania Pytań
 
-    df = spark.readStream \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP) \
-        .option("subscribe", "marketing-events") \
-        .load()
+Kompletny system przetwarzania pytań dla ćwiczeń z wykładowcą.
 
-    parsed = df.select(from_json(col("value").cast("string"), schema).alias("data")).select("data.*")
+## 📊 Architektura
 
-    agg = parsed.groupBy(window(parsed.event_id, "1 hour")).agg(count("*").alias("events_count"))
+```
+┌──────────┐    ┌───────┐    ┌───────┐    ┌────────────┐
+│ FastAPI  │───▶│ Redis │───▶│ Kafka │───▶│ PostgreSQL │
+│  (Web)   │    │       │    │       │    │            │
+└──────────┘    └───────┘    └───────┘    └────────────┘
+                                        ▲
+                                  ┌─────┴──────┐
+                                  │  Message   │
+                                  │  Processor │
+                                  └────────────┘
+```
 
-    query = agg.writeStream \
-        .outputMode("update") \
-        .format("console") \
-        .start()
+## 📦 Zawartość (41 zasobów Kubernetes)
 
-    query.awaitTermination()
-DAVTRO_EOF
-cat > "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/terraform/main.tf" << 'DAVTRO_EOF'
-terraform {
-  cloud {
-    organization = "davtro"
-    workspaces { name = "github-actions-terraform" }
-  }
-  required_providers {
-    github = { source = "integrations/github", version = "~> 6.0" }
-  }
-}
+### Core Applications
+- ✅ FastAPI (web UI + producer)
+- ✅ Redis to Kafka Bridge
+- ✅ Message Processor (Kafka → PostgreSQL)
+- ✅ Spring Boot App
 
-provider "github" {
-  token = var.github_token
-}
+### Infrastructure
+- ✅ PostgreSQL (DB + ClusterIP service)
+- ✅ Redis
+- ✅ Kafka (KRaft mode)
+- ✅ Vault (secrets management)
+- ✅ Spark (Master + Worker)
 
-variable "github_token" {
-  type      = string
-  sensitive = true
-}
+### Monitoring Stack (Full LGTM)
+- ✅ Prometheus + ServiceMonitors
+- ✅ Grafana (datasources + dashboards)
+- ✅ Loki + Promtail (logs)
+- ✅ Tempo (tracing)
+- ✅ Exporters: Postgres, Kafka, Node
 
-variable "ghcr_pat" {
-  type      = string
-  sensitive = true
-}
+### Tools
+- ✅ pgAdmin (PostgreSQL GUI)
+- ✅ Kafka UI
 
-resource "github_repository" "repo" {
-  name        = "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01"
-  description = "Davtro Apartments - platforma wynajmu krótkoterminowego (K8s/ArgoCD/Kafka/Redis/Vault)"
-  visibility  = "private"
-}
+### Kubernetes Resources
+- ✅ Namespace, ConfigMaps, Secrets
+- ✅ ServiceAccounts (kafka-job-sa, question-system-sa)
+- ✅ HPA (Horizontal Pod Autoscaler)
+- ✅ PDB (Pod Disruption Budget)
+- ✅ Network Policies
+- ✅ Ingress (main + spark)
+- ✅ Kyverno Policy
+- ✅ Kafka Topic Job
 
-resource "github_actions_secret" "ghcr_pat" {
-  repository      = github_repository.repo.name
-  secret_name     = "GHCR_PAT"
-  plaintext_value = var.ghcr_pat
-}
-DAVTRO_EOF
-chmod +x "website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/all-in-one.sh" 2>/dev/null || true
-echo "Gotowe. Projekt rozpakowany do katalogu: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01/"
-echo "Zobacz README.md w tym katalogu, zeby wiedziec jak zaczac."
+## 🚀 Quick Start
+
+### 1. Zbuduj obrazy
+```bash
+cd scripts
+./build-images.sh
+```
+
+### 2. Wdróż do Kubernetes
+```bash
+./deploy.sh
+```
+
+### 3. Uruchom port forwarding
+```bash
+./port-forward.sh
+```
+
+### 4. Otwórz aplikację
+- **FastAPI**: http://localhost:8000
+- **Grafana**: http://localhost:3000 (admin/admin)
+- **Prometheus**: http://localhost:9090
+- **Kafka UI**: http://localhost:9091
+- **pgAdmin**: http://localhost:5050
+- **Spark UI**: http://localhost:8081
+- **Vault**: http://localhost:8200 (token: root)
+
+## 📝 Przykład użycia
+
+### Wyślij pytanie przez curl
+```bash
+curl -X POST http://localhost:8000/api/questions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Jak działa Kafka?",
+    "author": "Jan Kowalski"
+  }'
+```
+
+### Sprawdź w PostgreSQL
+```bash
+kubectl exec -it deployment/postgres-db -n question-system -- \
+  psql -U postgres -d questions_db -c "SELECT * FROM questions;"
+```
+
+### Sprawdź logi
+```bash
+kubectl logs -f deployment/fastapi-app -n question-system
+kubectl logs -f deployment/message-processor -n question-system
+kubectl logs -f deployment/redis-to-kafka -n question-system
+```
+
+## 🧹 Czyszczenie
+```bash
+./scripts/cleanup.sh
+```
+
+## 📚 Dla studentów
+
+Projekt demonstruje:
+1. **Microservices** - rozdzielone komponenty
+2. **Message Queues** - Redis i Kafka
+3. **Event-Driven Architecture** - asynchroniczne przetwarzanie
+4. **Kubernetes** - deployment, scaling, monitoring
+5. **Observability** - metryki, logi, tracing (LGTM stack)
+6. **Security** - network policies, secrets, RBAC, Kyverno
+
+## 🔑 Domyślne hasła
+
+| Service | Username | Password |
+|---------|----------|----------|
+| Grafana | admin | admin |
+| pgAdmin | admin@example.com | admin |
+| Vault | - | root |
+| PostgreSQL | postgres | postgres_secure_password |
+| Redis | - | redis_secure_password |
+
+**UWAGA**: Zmień hasła przed użyciem produkcyjnym!
+
+## 📄 Licencja
+MIT
+EOF
+
+# ============================================================================
+# FINAL MESSAGE
+# ============================================================================
+cd ..
+
+echo ""
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  ✅ Projekt utworzony pomyślnie!                          ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${CYAN}📁 Struktura projektu:${NC}"
+echo "   $PROJECT_DIR/"
+echo "   ├── apps/"
+echo "   │   ├── fastapi-app/          (Web UI + Producer)"
+echo "   │   ├── message-processor/    (Kafka → PostgreSQL)"
+echo "   │   ├── redis-to-kafka/       (Redis → Kafka Bridge)"
+echo "   │   └── spring-app/           (Spring Boot)"
+echo "   ├── k8s/"
+echo "   │   ├── base/                 (14 plików - core)"
+echo "   │   ├── monitoring/           (9 plików - LGTM stack)"
+echo "   │   ├── tools/                (2 pliki - pgAdmin, Kafka UI)"
+echo "   │   └── policies/             (2 pliki - Network, Kyverno)"
+echo "   ├── scripts/"
+echo "   │   ├── build-images.sh"
+echo "   │   ├── deploy.sh"
+echo "   │   ├── cleanup.sh"
+echo "   │   └── port-forward.sh"
+echo "   └── README.md"
+echo ""
+echo -e "${CYAN}📊 Zawartość: 41 zasobów Kubernetes${NC}"
+echo "   ✅ Wszystkie z Twojej listy zostały utworzone!"
+echo ""
+echo -e "${YELLOW}🚀 Następne kroki:${NC}"
+echo "   1. cd $PROJECT_DIR"
+echo "   2. cd scripts && ./build-images.sh"
+echo "   3. ./deploy.sh"
+echo "   4. ./port-forward.sh"
+echo ""
+echo -e "${GREEN}💡 Chcesz spakować projekt do archiwum?${NC}"
+echo "   tar -czf $PROJECT_DIR.tar.gz $PROJECT_DIR/"
+echo ""
+
+
