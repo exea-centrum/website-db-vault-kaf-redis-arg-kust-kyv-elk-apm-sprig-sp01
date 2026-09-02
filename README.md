@@ -27,6 +27,36 @@ kubectl apply -f argocd/application.yaml -n argocd
 ```
 Push do `main` → GitHub Actions buduje obrazy → Kustomize aktualizuje tagi → ArgoCD sync.
 
+### Dostep ArgoCD do prywatnego repozytorium GitHub
+
+ArgoCD musi miec osobne dane dostepowe do prywatnego repozytorium. Tokenu nie
+wpisuj do tego repozytorium ani do `application.yaml`. Utworz secret w
+namespace `argocd` z tokenem GitHub (PAT powinien miec co najmniej `Contents:
+Read`):
+
+```bash
+read -s GITHUB_PAT
+export GITHUB_PAT
+kubectl create secret generic davtro-github-repo \
+	-n argocd \
+	--from-literal=type=git \
+	--from-literal=url=https://github.com/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01.git \
+	--from-literal=username=exea-centrum \
+	--from-literal=password="$GITHUB_PAT" \
+	--dry-run=client -o yaml |
+	kubectl label -f - argocd.argoproj.io/secret-type=repository --local -o yaml |
+	kubectl apply -f -
+unset GITHUB_PAT
+```
+
+Nastepnie odswiez ArgoCD:
+
+```bash
+kubectl annotate application davtro-website -n argocd \
+	argocd.argoproj.io/refresh=hard --overwrite
+kubectl get application davtro-website -n argocd -w
+```
+
 ## WAZNE – przed produkcja
 - Zamien Vault dev-mode na oficjalny Helm chart (HA + auto-unseal)
 - Skonfiguruj ArgoCD Vault Plugin (AVP) dla sekretow
