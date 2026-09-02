@@ -1,39 +1,68 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: davtro
 
 resources:
-  - namespace.yaml
-  - serviceaccount.yaml
-  - configmap.yaml
-  - secret.yaml
-  - deployment.yaml
-  - service.yaml
-  - hpa.yaml
-  - pdb.yaml
-  - postgres.yaml
+  # Istniejące zasoby
+  - postgres-db.yaml
+  - postgres-clusterip.yaml
   - redis.yaml
   - vault.yaml
-  - kafka.yaml
+  - kafka-kraft.yaml
+  - kafka-job-sa.yaml
+  - kafka-topic-job.yaml
+  - fastapi-config.yaml
+  - app-deployment.yaml
   - message-processor.yaml
-  - spring-app.yaml
-  - spark.yaml
+  - prometheus-config.yaml
+  - postgres-exporter.yaml
+  - kafka-exporter.yaml
+  - node-exporter.yaml
+  - service-monitors.yaml
   - prometheus.yaml
-  - exporters.yaml
-  # - service-monitors.yaml  # odkomentuj jesli zainstalowany Prometheus Operator
+  - grafana-datasource.yaml
+  - grafana-dashboards.yaml
   - grafana.yaml
+  - loki-config.yaml
   - loki.yaml
+  - promtail-config.yaml
   - promtail.yaml
+  - tempo-config.yaml
   - tempo.yaml
   - pgadmin.yaml
   - kafka-ui.yaml
   - network-policies.yaml
-  - ingress.yaml
   - kyverno-policy.yaml
+  
+  # Nowe zasoby
+  - mongodb.yaml
+  - elasticsearch.yaml
+  - logstash.yaml
+  - kibana.yaml
+  - spring-app-deployment.yaml
+  - spark-master.yaml
+  - spark-worker.yaml
+  - monitoring-extended.yaml
+  - ingress-extended.yaml
 
-images:
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
-    newTag: latest
+# Common labels
+commonLabels:
+  app: 
+  app.kubernetes.io/name: 
+  app.kubernetes.io/instance: 
+  app.kubernetes.io/managed-by: kustomize
+
+# Zmienne
+vars:
+  - name: NAMESPACE
+    objref:
+      kind: Namespace
+      name: davtro
+    fieldref:
+      fieldpath: metadata.name
+  - name: PROJECT
+    objref:
+      kind: ConfigMap
+      name: fastapi-config
+    fieldref:
+      fieldpath: data.PROJECT

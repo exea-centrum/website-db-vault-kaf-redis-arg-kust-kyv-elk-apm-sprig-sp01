@@ -1,0 +1,109 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: -ingress-extended
+  namespace: davtro
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+spec:
+  rules:
+  - host: app..local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: fastapi-web-service
+            port:
+              number: 80
+      - path: /new-survey
+        pathType: Prefix
+        backend:
+          service:
+            name: fastapi-web-service
+            port:
+              number: 80
+      - path: /api/v2
+        pathType: Prefix
+        backend:
+          service:
+            name: fastapi-web-service
+            port:
+              number: 80
+      - path: /api/spring
+        pathType: Prefix
+        backend:
+          service:
+            name: spring-app-service
+            port:
+              number: 8080
+  
+  - host: spring..local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: spring-app-service
+            port:
+              number: 8080
+  
+  - host: spark..local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: spark-master
+            port:
+              number: 8080
+  
+  - host: kibana..local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kibana
+            port:
+              number: 5601
+  
+  - host: grafana..local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 80
+  
+  - host: pgadmin..local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pgadmin
+            port:
+              number: 80
+  
+  - host: kafka-ui..local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kafka-ui
+            port:
+              number: 8080

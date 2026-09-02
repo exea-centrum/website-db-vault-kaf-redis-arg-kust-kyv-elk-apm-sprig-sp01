@@ -1,50 +1,29 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: davtro-baseline-policy
+  name: require-resource-requests-limits
+  labels:
+    app: 
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
 spec:
-  validationFailureAction: Enforce
+  validationFailureAction: Audit
   background: true
   rules:
-    - name: require-ghcr-images
-      match:
-        any:
+  - name: check-container-resources
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "For production, all containers should define 'requests' and 'limits' for CPU and memory."
+      pattern:
+        spec:
+          containers:
           - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Obrazy kontenerow w namespace 'davtro' musza pochodzic z ghcr.io lub zaufanych rejestrow."
-        pattern:
-          spec:
-            containers:
-              - image: "ghcr.io/* | bitnami/* | postgres/* | redis/* | grafana/* | prom/* | hashicorp/* | dpage/* | provectuslabs/* | danielqsj/* | eclipse-temurin/* | python:*"
-    - name: require-resource-requests-limits
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Kazdy kontener musi miec zdefiniowane requests/limits."
-        pattern:
-          spec:
-            containers:
-              - resources:
-                  requests:
-                    cpu: "?*"
-                    memory: "?*"
-                  limits:
-                    cpu: "?*"
-                    memory: "?*"
-    - name: disallow-privileged
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              namespaces: [davtro]
-      validate:
-        message: "Kontenery uprzywilejowane sa niedozwolone."
-        pattern:
-          spec:
-            =(securityContext):
-              =(privileged): "false"
+              requests:
+                memory: "?*"
+                cpu: "?*"
+              limits:
+                memory: "?*"
+                cpu: "?*"

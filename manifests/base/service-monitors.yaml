@@ -1,14 +1,94 @@
-# Wymaga Prometheus Operatora (CRD ServiceMonitor)
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: davtro-services
+  name: fastapi-monitor
   namespace: davtro
-  labels: { release: prometheus }
+  labels:
+    app: 
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
 spec:
   selector:
-    matchExpressions:
-      - { key: app, operator: In, values: [fastapi-web-app, postgres-exporter, kafka-exporter] }
+    matchLabels:
+      app: 
+      component: fastapi
   endpoints:
-    - port: metrics
-      interval: 15s
+  - port: http
+    path: /metrics
+    interval: 15s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-monitor
+  namespace: davtro
+  labels:
+    app: 
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+spec:
+  selector:
+    matchLabels:
+      app: 
+      component: redis
+  endpoints:
+  - port: redis
+    interval: 30s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-monitor
+  namespace: davtro
+  labels:
+    app: 
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+spec:
+  selector:
+    matchLabels:
+      app: 
+      component: postgres-exporter
+  endpoints:
+  - port: http
+    interval: 30s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafka-monitor
+  namespace: davtro
+  labels:
+    app: 
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+spec:
+  selector:
+    matchLabels:
+      app: 
+      component: kafka-exporter
+  endpoints:
+  - port: http
+    interval: 30s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: node-monitor
+  namespace: davtro
+  labels:
+    app: 
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+spec:
+  selector:
+    matchLabels:
+      app: 
+      component: node-exporter
+  endpoints:
+  - port: http
+    interval: 30s

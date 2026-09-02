@@ -1,49 +1,93 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-  namespace: davtro
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-    scrape_configs:
-      - job_name: fastapi
-        static_configs: [{ targets: ["fastapi-web-app-svc:80"] }]
-      - job_name: postgres-exporter
-        static_configs: [{ targets: ["postgres-exporter:9187"] }]
-      - job_name: kafka-exporter
-        static_configs: [{ targets: ["kafka-exporter:9308"] }]
-      - job_name: node-exporter
-        static_configs: [{ targets: ["node-exporter:9100"] }]
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus
   namespace: davtro
+  labels:
+    app: 
+    component: prometheus
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+    app.kubernetes.io/component: prometheus
 spec:
   replicas: 1
-  selector: { matchLabels: { app: prometheus } }
+  selector:
+    matchLabels:
+      app: 
+      component: prometheus
   template:
-    metadata: { labels: { app: prometheus } }
+    metadata:
+      labels:
+        app: 
+        component: prometheus
+        app.kubernetes.io/name: 
+        app.kubernetes.io/instance: 
+        app.kubernetes.io/component: prometheus
     spec:
       containers:
-        - name: prometheus
-          image: prom/prometheus:v2.54.1
-          args: ["--config.file=/etc/prometheus/prometheus.yml"]
-          ports: [{ containerPort: 9090 }]
-          volumeMounts:
-            - { name: config, mountPath: /etc/prometheus }
-      volumes:
+      - name: prometheus
+        image: prom/prometheus:v2.48.0
+        ports:
+        - containerPort: 9090
+        volumeMounts:
         - name: config
-          configMap: { name: prometheus-config }
+          mountPath: /etc/prometheus
+        - name: data
+          mountPath: /prometheus
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        args:
+        - '--config.file=/etc/prometheus/prometheus.yml'
+        - '--storage.tsdb.path=/prometheus'
+        - '--web.console.libraries=/etc/prometheus/console_libraries'
+        - '--web.console.templates=/etc/prometheus/consoles'
+        - '--storage.tsdb.retention.time=200h'
+        - '--web.enable-lifecycle'
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: prometheus-data
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: prometheus
+  name: prometheus-service
   namespace: davtro
+  labels:
+    app: 
+    component: prometheus
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+    app.kubernetes.io/component: prometheus
 spec:
-  selector: { app: prometheus }
-  ports: [{ port: 9090, targetPort: 9090 }]
+  ports:
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: 
+    component: prometheus
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: davtro
+  labels:
+    app: 
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
