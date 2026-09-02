@@ -1,13 +1,8 @@
-FROM eclipse-temurin:17-jdk-alpine as builder
+FROM eclipse-temurin:17-jdk-alpine
+RUN addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -D appuser
 WORKDIR /app
-COPY .mvn/ .mvn
-COPY mvnw pom.xml ./
-RUN ./mvnw dependency:go-offline
-COPY src ./src
-RUN ./mvnw clean package -DskipTests
-
-FROM eclipse-temurin:17-jre-alpine
-WORKDIR /app
-COPY --from=builder /app/target/*.jar app.jar
-EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+COPY target/rental-processor-1.0.0.jar app.jar
+RUN chown appuser:appgroup app.jar
+USER appuser
+EXPOSE 8081
+ENTRYPOINT ["java","-jar","app.jar"]
