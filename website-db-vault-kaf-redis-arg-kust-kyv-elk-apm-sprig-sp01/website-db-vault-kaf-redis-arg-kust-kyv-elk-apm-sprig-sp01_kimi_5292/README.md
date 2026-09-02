@@ -1,4 +1,4 @@
-# website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar - Complete Monitoring Stack with Spring Boot, Spark & ELK
+#  - Complete Monitoring Stack with Spring Boot, Spark & ELK
 
 ## 🛠️ Quick Start
 
@@ -13,14 +13,14 @@ kubectl apply -k manifests/base
 kubectl -n davtro get pods -w
 
 # Access applications:
-# Main App: http://app.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local
-# New Survey: http://app.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local/new-survey
-# Spring Boot API: http://spring.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local
-# Spark UI: http://spark.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local
-# Kibana: http://kibana.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local
-# Grafana: http://grafana.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local (admin/admin)
-# PgAdmin: http://pgadmin.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local (admin@example.com/adminpassword)
-# Kafka UI: http://kafka-ui.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local
+# Main App: http://app..local
+# New Survey: http://app..local/new-survey
+# Spring Boot API: http://spring..local
+# Spark UI: http://spark..local
+# Kibana: http://kibana..local
+# Grafana: http://grafana..local (admin/admin)
+# PgAdmin: http://pgadmin..local (admin@example.com/adminpassword)
+# Kafka UI: http://kafka-ui..local
 
 # Initialize Vault
 kubectl wait --for=condition=complete job/vault-init -n davtro
@@ -33,14 +33,14 @@ kubectl wait --for=condition=complete job/mongodb-init -n davtro
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Application | http://app.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local | - |
-| New Survey (Spring Boot) | http://app.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local/new-survey | - |
-| Spring Boot API | http://spring.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local | - |
-| Spark Master UI | http://spark.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local | - |
-| Kibana | http://kibana.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local | - |
-| Grafana | http://grafana.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local | admin/admin |
-| PgAdmin | http://pgadmin.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local | admin@example.com/adminpassword |
-| Kafka UI | http://kafka-ui.website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.local | - |
+| Application | http://app..local | - |
+| New Survey (Spring Boot) | http://app..local/new-survey | - |
+| Spring Boot API | http://spring..local | - |
+| Spark Master UI | http://spark..local | - |
+| Kibana | http://kibana..local | - |
+| Grafana | http://grafana..local | admin/admin |
+| PgAdmin | http://pgadmin..local | admin@example.com/adminpassword |
+| Kafka UI | http://kafka-ui..local | - |
 
 ## 🏗️ Architecture Components:
 

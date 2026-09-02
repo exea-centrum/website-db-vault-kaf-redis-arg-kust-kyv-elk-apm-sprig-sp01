@@ -1,0 +1,29 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-requests-limits
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    app.kubernetes.io/name: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    app.kubernetes.io/instance: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+  - name: check-container-resources
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "For production, all containers should define 'requests' and 'limits' for CPU and memory."
+      pattern:
+        spec:
+          containers:
+          - resources:
+              requests:
+                memory: "?*"
+                cpu: "?*"
+              limits:
+                memory: "?*"
+                cpu: "?*"

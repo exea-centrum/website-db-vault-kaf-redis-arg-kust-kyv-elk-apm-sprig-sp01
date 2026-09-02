@@ -1,0 +1,64 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    
+spring:
+  application:
+    name: survey-spring-app
+  
+  data:
+    mongodb:
+      uri: mongodb://mongodb:27017/survey_db
+      auto-index-creation: true
+  
+  kafka:
+    bootstrap-servers: kafka:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.type.mapping: surveyResponse:com.davtroweb.survey.model.SurveyResponse
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.type.mapping: surveyResponse:com.davtroweb.survey.model.SurveyResponse
+        spring.json.trusted.packages: "*"
+  
+  jackson:
+    time-zone: UTC
+    date-format: com.fasterxml.jackson.databind.util.ISO8601DateFormat
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    com.davtroweb.survey: DEBUG
+    org.springframework.kafka: INFO
+    org.apache.kafka: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: /var/log/spring-survey.log
+
+elk:
+  enabled: true
+  elasticsearch:
+    url: http://elasticsearch:9200
+  logstash:
+    url: http://logstash:5000
+
+spark:
+  master: spark://spark-master:7077
+  streaming:
+    enabled: true
+    checkpoint-dir: /tmp/spark-checkpoints

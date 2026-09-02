@@ -24,9 +24,9 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar:latest
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar:${{ github.sha }}
-          cache-from: type=registry,ref=ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar:latest
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01:latest
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01:latest
           cache-to: type=inline
 
   build-spring:
@@ -53,8 +53,8 @@ jobs:
           context: ./java-app
           push: true
           tags: |
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar-spring:latest
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar-spring:${{ github.sha }}
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring:latest
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring:${{ github.sha }}
 
   build-spark:
     runs-on: ubuntu-latest
@@ -78,8 +78,8 @@ jobs:
           context: ./spark-jobs
           push: true
           tags: |
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar-spark:latest
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar-spark:${{ github.sha }}
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark:latest
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark:${{ github.sha }}
 
   deploy:
     runs-on: ubuntu-latest
@@ -92,18 +92,18 @@ jobs:
         run: |
           cd manifests/base
           kustomize edit set image \
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar=ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar:${{ github.sha }} \
-            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar-spring=ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar-spring:${{ github.sha }}
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01=ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01:${{ github.sha }} \
+            ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring=ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring:${{ github.sha }}
       
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -k manifests/base --namespace=davtroelkpyjs
-          kubectl rollout status deployment/fastapi-web-app -n davtroelkpyjs --timeout=300s
-          kubectl rollout status deployment/spring-app -n davtroelkpyjs --timeout=300s
-          kubectl rollout status deployment/spark-master -n davtroelkpyjs --timeout=300s
-          kubectl rollout status deployment/spark-worker -n davtroelkpyjs --timeout=300s
+          kubectl apply -k manifests/base --namespace=davtro
+          kubectl rollout status deployment/fastapi-web-app -n davtro --timeout=300s
+          kubectl rollout status deployment/spring-app -n davtro --timeout=300s
+          kubectl rollout status deployment/spark-master -n davtro --timeout=300s
+          kubectl rollout status deployment/spark-worker -n davtro --timeout=300s
       
       - name: Verify Deployment
         run: |
-          kubectl get pods -n davtroelkpyjs
-          kubectl get svc -n davtroelkpyjs
+          kubectl get pods -n davtro
+          kubectl get svc -n davtro

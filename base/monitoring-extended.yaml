@@ -1,0 +1,195 @@
+# Exporter dla MongoDB
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-exporter
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    component: mongodb-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+      component: mongodb-exporter
+  template:
+    metadata:
+      labels:
+        app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+        component: mongodb-exporter
+    spec:
+      containers:
+        - name: mongodb-exporter
+          image: percona/mongodb_exporter:0.39.0
+          ports:
+            - containerPort: 9216
+          args:
+            - --mongodb.uri=mongodb://admin:adminpassword@mongodb:27017
+            - --collect.collection
+            - --collect.database
+            - --collect.indexusage
+            - --collect.connpoolstats
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    component: mongodb-exporter
+spec:
+  ports:
+    - port: 9216
+      targetPort: 9216
+  selector:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    component: mongodb-exporter
+
+# ServiceMonitor dla MongoDB
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mongodb-monitor
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+spec:
+  selector:
+    matchLabels:
+      app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+      component: mongodb-exporter
+  endpoints:
+  - port: http
+    interval: 30s
+
+# ServiceMonitor dla Spring Boot
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: spring-monitor
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+spec:
+  selector:
+    matchLabels:
+      app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+      component: spring-app
+  endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 15s
+
+# ServiceMonitor dla Elasticsearch
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: elasticsearch-monitor
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+spec:
+  selector:
+    matchLabels:
+      app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+      component: elasticsearch
+  endpoints:
+  - port: http
+    path: /_prometheus/metrics
+    interval: 30s
+
+# Dodatkowe dashbordy Grafana
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-extended
+  namespace: davtro
+data:
+  spring-boot-dashboard.json: |-
+    {
+      "dashboard": {
+        "title": "Spring Boot Metrics",
+        "panels": [
+          {
+            "title": "HTTP Requests",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_server_requests_seconds_count[5m])",
+                "legendFormat": "{{method}} {{status}}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  
+  spark-dashboard.json: |-
+    {
+      "dashboard": {
+        "title": "Apache Spark",
+        "panels": [
+          {
+            "title": "Spark Applications",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "spark_running_applications",
+                "legendFormat": "Running Apps"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  
+  mongodb-dashboard.json: |-
+    {
+      "dashboard": {
+        "title": "MongoDB Metrics",
+        "panels": [
+          {
+            "title": "MongoDB Connections",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "mongodb_connections_current",
+                "legendFormat": "Connections"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  
+  elk-dashboard.json: |-
+    {
+      "dashboard": {
+        "title": "ELK Stack",
+        "panels": [
+          {
+            "title": "Elasticsearch Health",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "elasticsearch_cluster_health_status",
+                "legendFormat": "{{cluster}}"
+              }
+            ]
+          }
+        ]
+      }
+    }

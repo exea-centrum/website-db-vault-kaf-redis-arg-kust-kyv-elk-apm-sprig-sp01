@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    component: logstash
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+      component: logstash
+  template:
+    metadata:
+      labels:
+        app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+        component: logstash
+    spec:
+      containers:
+        - name: logstash
+          image: logstash:8.10.2
+          ports:
+            - containerPort: 5000
+              name: tcp
+            - containerPort: 5001
+              name: http
+            - containerPort: 9600
+              name: monitoring
+          env:
+            - name: XPACK_MONITORING_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: logstash-config
+              mountPath: /usr/share/logstash/pipeline/
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          readinessProbe:
+            tcpSocket:
+              port: 9600
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: logstash-config
+          configMap:
+            name: logstash-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    component: logstash
+data:
+  logstash.conf: |
+    input {
+      tcp {
+        port => 5000
+        codec => json
+      }
+      http {
+        port => 5001
+        codec => json
+      }
+      beats {
+        port => 5044
+      }
+    }
+    
+    filter {
+      if [type] == "survey" {
+        mutate {
+          add_field => { 
+            "[@metadata][index]" => "surveys-%{+YYYY.MM.dd}"
+          }
+        }
+      } else if [type] == "spark" {
+        mutate {
+          add_field => { 
+            "[@metadata][index]" => "spark-%{+YYYY.MM.dd}"
+          }
+        }
+      } else {
+        mutate {
+          add_field => { 
+            "[@metadata][index]" => "logs-%{+YYYY.MM.dd}"
+          }
+        }
+      }
+      
+      date {
+        match => [ "timestamp", "ISO8601" ]
+        target => "@timestamp"
+      }
+      
+      mutate {
+        remove_field => [ "timestamp" ]
+      }
+    }
+    
+    output {
+      elasticsearch {
+        hosts => ["elasticsearch:9200"]
+        index => "%{[@metadata][index]}"
+      }
+      
+      stdout {
+        codec => rubydebug
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: davtro
+  labels:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    component: logstash
+spec:
+  ports:
+    - port: 5000
+      targetPort: 5000
+      name: tcp
+    - port: 5001
+      targetPort: 5001
+      name: http
+    - port: 5044
+      targetPort: 5044
+      name: beats
+  selector:
+    app: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+    component: logstash

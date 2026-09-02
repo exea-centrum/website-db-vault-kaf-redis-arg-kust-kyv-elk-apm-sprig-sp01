@@ -1,12 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar
+  name: 
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://github.com/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-spar.git
+    repoURL: 
     targetRevision: HEAD
     path: manifests/base
   destination:
