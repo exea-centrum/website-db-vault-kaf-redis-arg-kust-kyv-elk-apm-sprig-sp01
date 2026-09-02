@@ -18,6 +18,9 @@ spec:
           image: bitnami/spark:3.5
           command: ["/opt/bitnami/spark/sbin/start-master.sh"]
           ports: [{ containerPort: 7077 }, { containerPort: 8082 }]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 768Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -52,3 +55,6 @@ spec:
           env:
             - { name: SPARK_WORKER_CORES, value: "1" }
             - { name: SPARK_WORKER_MEMORY, value: "1g" }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: 500m, memory: 1Gi }

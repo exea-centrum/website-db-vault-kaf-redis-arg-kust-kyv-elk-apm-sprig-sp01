@@ -20,6 +20,9 @@ spec:
             - { name: KAFKA_CLUSTERS_0_NAME, value: davtro }
             - { name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS, value: "kafka-kraft:9092" }
           ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
 ---
 apiVersion: v1
 kind: Service

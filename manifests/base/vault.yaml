@@ -24,6 +24,9 @@ spec:
           env:
             - name: VAULT_DEV_ROOT_TOKEN_ID
               valueFrom: { secretKeyRef: { name: davtro-secrets, key: VAULT_ROOT_TOKEN, optional: true } }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 250m, memory: 256Mi }
 ---
 apiVersion: v1
 kind: Service

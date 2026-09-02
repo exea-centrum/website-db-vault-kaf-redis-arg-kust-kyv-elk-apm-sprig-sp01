@@ -19,6 +19,10 @@ spec:
           ports: [{ containerPort: 8081 }]
           envFrom:
             - secretRef: { name: davtro-secrets }
+          env:
+            - { name: DB_HOST, value: "postgres-db" }
+            - { name: DB_NAME, value: "davtro_rentals" }
+            - { name: KAFKA_BOOTSTRAP, value: "kafka-kraft:9092" }
           resources:
             requests: { cpu: 200m, memory: 256Mi }
             limits: { cpu: 500m, memory: 512Mi }

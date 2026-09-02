@@ -16,13 +16,14 @@ spec:
         runAsUser: 70
         runAsGroup: 70
         fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: postgres
           image: postgres:16-alpine
           ports: [{ containerPort: 5432 }]
           env:
             - name: POSTGRES_DB
-              value: davtro
+              value: davtro_rentals
             - name: POSTGRES_USER
               valueFrom: { secretKeyRef: { name: davtro-secrets, key: DB_USER } }
             - name: POSTGRES_PASSWORD
@@ -30,6 +31,9 @@ spec:
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
   volumeClaimTemplates:
     - metadata: { name: pgdata }
       spec:

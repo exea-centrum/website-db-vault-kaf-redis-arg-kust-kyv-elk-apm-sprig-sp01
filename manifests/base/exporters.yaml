@@ -18,8 +18,11 @@ spec:
           image: prometheuscommunity/postgres-exporter:v0.15.0
           env:
             - name: DATA_SOURCE_NAME
-              value: "postgresql://postgres:postgres@postgres-clusterip:5432/davtro?sslmode=disable"
+              value: "postgresql://davtro:changeme@postgres-db:5432/davtro_rentals?sslmode=disable"
           ports: [{ containerPort: 9187 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -50,6 +53,9 @@ spec:
           image: danielqsj/kafka-exporter:v1.7.0
           args: ["--kafka.server=kafka-kraft:9092"]
           ports: [{ containerPort: 9308 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -73,11 +79,16 @@ spec:
       hostNetwork: true
       hostPID: true
       securityContext:
-        runAsUser: 0
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
       containers:
         - name: node-exporter
           image: prom/node-exporter:v1.8.2
           ports: [{ containerPort: 9100 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
 ---
 apiVersion: v1
 kind: Service

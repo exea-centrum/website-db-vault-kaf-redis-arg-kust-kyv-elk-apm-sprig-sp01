@@ -52,6 +52,9 @@ spec:
           volumeMounts:
             - { name: datasource, mountPath: /etc/grafana/provisioning/datasources }
             - { name: dashboards, mountPath: /etc/grafana/provisioning/dashboards-data }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
       volumes:
         - name: datasource
           configMap: { name: grafana-datasource }

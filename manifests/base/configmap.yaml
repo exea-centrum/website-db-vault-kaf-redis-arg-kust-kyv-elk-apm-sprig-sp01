@@ -4,7 +4,9 @@ metadata:
   name: fastapi-config
   namespace: davtro
 data:
+  DB_HOST: "postgres-db"
+  DB_PORT: "5432"
+  DB_NAME: "davtro_rentals"
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
   KAFKA_BOOTSTRAP_SERVERS: "kafka-kraft:9092"
-  DATABASE_URL: "postgresql://postgres:postgres@postgres-clusterip:5432/davtro"

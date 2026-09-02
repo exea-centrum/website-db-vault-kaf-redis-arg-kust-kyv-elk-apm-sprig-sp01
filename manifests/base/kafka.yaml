@@ -26,6 +26,9 @@ spec:
             - { name: KAFKA_CFG_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka-kraft:9092" }
             - { name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS, value: "0@kafka-kraft-0.kafka-kraft:9093" }
             - { name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: 1, memory: 1Gi }
           volumeMounts:
             - name: kafka-data
               mountPath: /bitnami/kafka
@@ -60,6 +63,9 @@ spec:
       containers:
         - name: kafka-topic-init
           image: bitnami/kafka:3.7
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 200m, memory: 256Mi }
           command:
             - /bin/bash
             - -c
