@@ -16,7 +16,7 @@ spec:
       containers:
         - name: spark-master
           image: apache/spark:3.5.0
-          command: ["/opt/spark/sbin/start-master.sh"]
+          command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "0.0.0.0", "--port", "7077", "--webui-port", "8082"]
           ports: [{ containerPort: 7077 }, { containerPort: 8082 }]
           volumeMounts:
             - { name: spark-logs, mountPath: /opt/spark/logs }
@@ -55,7 +55,7 @@ spec:
       containers:
         - name: spark-worker
           image: apache/spark:3.5.0
-          command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-master-svc:7077"]
+          command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master-svc:7077"]
           volumeMounts:
             - { name: spark-logs, mountPath: /opt/spark/logs }
           env:
