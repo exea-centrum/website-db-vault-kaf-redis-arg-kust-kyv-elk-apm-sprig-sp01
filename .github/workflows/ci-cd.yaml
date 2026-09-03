@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -91,7 +91,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT_02 }}
       - name: Build Spark assembly
         working-directory: ./spark-jobs
-        run: sbt assembly
+        run: sbt -batch clean assembly
       - uses: docker/build-push-action@v6
         with:
           context: ./spark-jobs
