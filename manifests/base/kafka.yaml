@@ -11,10 +11,6 @@ spec:
   template:
     metadata: { labels: { app: kafka-kraft } }
     spec:
-      securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
       containers:
         - name: kafka
           image: apache/kafka:3.7.0
@@ -70,6 +66,9 @@ spec:
     spec:
       serviceAccountName: kafka-job-sa
       restartPolicy: OnFailure
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
       containers:
         - name: kafka-topic-init
           image: apache/kafka:3.7.0
