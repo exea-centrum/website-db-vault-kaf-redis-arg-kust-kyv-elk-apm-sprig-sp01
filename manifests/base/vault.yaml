@@ -12,10 +12,6 @@ spec:
     metadata: { labels: { app: vault } }
     spec:
       serviceAccountName: davtro-sa
-      securityContext:
-        runAsUser: 100
-        runAsGroup: 1000
-        fsGroup: 1000
       containers:
         - name: vault
           image: hashicorp/vault:1.17
