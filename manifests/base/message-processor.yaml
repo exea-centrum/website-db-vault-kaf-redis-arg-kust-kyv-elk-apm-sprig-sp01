@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: message-processor
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: message-processor } }

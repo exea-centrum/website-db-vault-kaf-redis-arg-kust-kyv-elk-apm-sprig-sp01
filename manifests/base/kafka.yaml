@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: kafka-kraft
-  namespace: davtro
+  namespace: davtro02
 spec:
   serviceName: kafka-kraft
   replicas: 1
@@ -42,7 +42,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kafka-kraft
-  namespace: davtro
+  namespace: davtro02
 spec:
   clusterIP: None
   selector: { app: kafka-kraft }
@@ -54,7 +54,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: kafka-topic-job
-  namespace: davtro
+  namespace: davtro02
 spec:
   template:
     spec:

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: spring-app-deployment
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: spring-app } }
@@ -31,7 +31,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: spring-app-svc
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: spring-app }
   ports: [{ port: 80, targetPort: 8081 }]

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fastapi-web-app
-  namespace: davtro
+  namespace: davtro02
   labels: { app: fastapi-web-app }
 spec:
   replicas: 2

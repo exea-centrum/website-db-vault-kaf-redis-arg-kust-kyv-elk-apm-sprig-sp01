@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-ingress
-  namespace: davtro
+  namespace: davtro02
 spec:
   podSelector: {}
   policyTypes: [Ingress]
@@ -11,7 +11,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-intra-namespace
-  namespace: davtro
+  namespace: davtro02
 spec:
   podSelector: {}
   ingress:
@@ -22,7 +22,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-ingress-to-web
-  namespace: davtro
+  namespace: davtro02
 spec:
   podSelector: { matchLabels: { app: fastapi-web-app } }
   ingress:

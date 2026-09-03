@@ -1,6 +1,6 @@
 terraform {
   cloud {
-    organization = "davtro"
+    organization = "davtro02"
     workspaces { name = "github-actions-terraform" }
   }
   required_providers {

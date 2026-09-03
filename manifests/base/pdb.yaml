@@ -2,7 +2,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: fastapi-web-app-pdb
-  namespace: davtro
+  namespace: davtro02
 spec:
   minAvailable: 1
   selector:

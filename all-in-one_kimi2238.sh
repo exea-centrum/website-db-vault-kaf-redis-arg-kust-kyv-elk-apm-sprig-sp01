@@ -772,13 +772,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: davtro-sa
-  namespace: davtro
+  namespace: davtro02
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: kafka-job-sa
-  namespace: davtro
+  namespace: davtro02
 EOF
 
 cat > ${PROJECT_NAME}/manifests/base/configmap.yaml << 'EOF'
@@ -786,7 +786,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: fastapi-config
-  namespace: davtro
+  namespace: davtro02
 data:
   DB_HOST: "postgres-db"
   DB_PORT: "5432"
@@ -802,7 +802,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: davtro-secrets
-  namespace: davtro
+  namespace: davtro02
 type: Opaque
 stringData:
   DB_USER: "davtro"
@@ -817,7 +817,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fastapi-web-app
-  namespace: davtro
+  namespace: davtro02
   labels: { app: fastapi-web-app }
 spec:
   replicas: 2
@@ -855,7 +855,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: fastapi-web-app-svc
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: fastapi-web-app }
   ports:
@@ -868,7 +868,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: fastapi-web-app-hpa
-  namespace: davtro
+  namespace: davtro02
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -888,7 +888,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: fastapi-web-app-pdb
-  namespace: davtro
+  namespace: davtro02
 spec:
   minAvailable: 1
   selector:
@@ -900,7 +900,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres-db
-  namespace: davtro
+  namespace: davtro02
 spec:
   serviceName: postgres-clusterip
   replicas: 1
@@ -942,7 +942,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres-clusterip
-  namespace: davtro
+  namespace: davtro02
 spec:
   clusterIP: None
   selector: { app: postgres-db }
@@ -954,7 +954,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: redis } }
@@ -977,7 +977,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: redis
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: redis }
   ports: [{ port: 6379, targetPort: 6379 }]
@@ -989,7 +989,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: vault
-  namespace: davtro
+  namespace: davtro02
 spec:
   serviceName: vault
   replicas: 1
@@ -1015,7 +1015,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: vault
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: vault }
   ports: [{ port: 8200, targetPort: 8200 }]
@@ -1027,7 +1027,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: kafka-kraft
-  namespace: davtro
+  namespace: davtro02
 spec:
   serviceName: kafka-kraft
   replicas: 1
@@ -1063,7 +1063,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kafka-kraft
-  namespace: davtro
+  namespace: davtro02
 spec:
   clusterIP: None
   selector: { app: kafka-kraft }
@@ -1075,7 +1075,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: kafka-topic-job
-  namespace: davtro
+  namespace: davtro02
 spec:
   template:
     spec:
@@ -1098,7 +1098,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: message-processor
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: message-processor } }
@@ -1126,7 +1126,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: spring-app-deployment
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: spring-app } }
@@ -1155,7 +1155,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: spring-app-svc
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: spring-app }
   ports: [{ port: 80, targetPort: 8081 }]
@@ -1166,7 +1166,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: spark-master
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: spark-master } }
@@ -1187,7 +1187,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: spark-master-svc
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: spark-master }
   ports:
@@ -1198,7 +1198,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: spark-worker
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 2
   selector: { matchLabels: { app: spark-worker } }
@@ -1223,7 +1223,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: prometheus-config
-  namespace: davtro
+  namespace: davtro02
 data:
   prometheus.yml: |
     global:
@@ -1242,7 +1242,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: prometheus } }
@@ -1268,7 +1268,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: prometheus
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: prometheus }
   ports: [{ port: 9090, targetPort: 9090 }]
@@ -1279,7 +1279,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres-exporter
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: postgres-exporter } }
@@ -1302,7 +1302,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres-exporter
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: postgres-exporter }
   ports: [{ port: 9187, targetPort: 9187 }]
@@ -1311,7 +1311,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kafka-exporter
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: kafka-exporter } }
@@ -1332,7 +1332,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kafka-exporter
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: kafka-exporter }
   ports: [{ port: 9308, targetPort: 9308 }]
@@ -1341,7 +1341,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: node-exporter
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { matchLabels: { app: node-exporter } }
   template:
@@ -1360,7 +1360,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: node-exporter
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: node-exporter }
   ports: [{ port: 9100, targetPort: 9100 }]
@@ -1371,7 +1371,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-datasource
-  namespace: davtro
+  namespace: davtro02
 data:
   datasource.yaml: |
     apiVersion: 1
@@ -1394,7 +1394,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboards
-  namespace: davtro
+  namespace: davtro02
 data:
   davtro-overview.json: |
     { "title": "Davtro Platform Overview", "panels": [] }
@@ -1403,7 +1403,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: grafana } }
@@ -1431,7 +1431,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: grafana
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: grafana }
   ports: [{ port: 3000, targetPort: 3000 }]
@@ -1442,7 +1442,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: loki-config
-  namespace: davtro
+  namespace: davtro02
 data:
   loki-config.yaml: |
     auth_enabled: false
@@ -1483,7 +1483,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: loki
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: loki } }
@@ -1514,7 +1514,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: loki
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: loki }
   ports: [{ port: 3100, targetPort: 3100 }]
@@ -1525,7 +1525,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: promtail-config
-  namespace: davtro
+  namespace: davtro02
 data:
   promtail.yaml: |
     server:
@@ -1547,7 +1547,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: promtail
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { matchLabels: { app: promtail } }
   template:
@@ -1578,7 +1578,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: tempo-config
-  namespace: davtro
+  namespace: davtro02
 data:
   tempo.yaml: |
     server: { http_listen_port: 3200 }
@@ -1593,7 +1593,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tempo
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: tempo } }
@@ -1619,7 +1619,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: tempo
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: tempo }
   ports: [{ port: 3200, targetPort: 3200 }]
@@ -1630,7 +1630,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: pgadmin
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: pgadmin } }
@@ -1654,7 +1654,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: pgadmin
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: pgadmin }
   ports: [{ port: 80, targetPort: 80 }]
@@ -1665,7 +1665,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kafka-ui
-  namespace: davtro
+  namespace: davtro02
 spec:
   replicas: 1
   selector: { matchLabels: { app: kafka-ui } }
@@ -1688,7 +1688,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kafka-ui
-  namespace: davtro
+  namespace: davtro02
 spec:
   selector: { app: kafka-ui }
   ports: [{ port: 80, targetPort: 8080 }]
@@ -1699,7 +1699,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-ingress
-  namespace: davtro
+  namespace: davtro02
 spec:
   podSelector: {}
   policyTypes: [Ingress]
@@ -1708,7 +1708,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-intra-namespace
-  namespace: davtro
+  namespace: davtro02
 spec:
   podSelector: {}
   ingress:
@@ -1719,7 +1719,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-ingress-to-web
-  namespace: davtro
+  namespace: davtro02
 spec:
   podSelector: { matchLabels: { app: fastapi-web-app } }
   ingress:
@@ -1733,7 +1733,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: davtro-ingress
-  namespace: davtro
+  namespace: davtro02
 spec:
   ingressClassName: public
   rules:
@@ -1761,7 +1761,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: spark-ingress
-  namespace: davtro
+  namespace: davtro02
 spec:
   ingressClassName: public
   rules:
@@ -1833,7 +1833,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: davtro-services
-  namespace: davtro
+  namespace: davtro02
   labels: { release: prometheus }
 spec:
   selector:
@@ -1894,7 +1894,7 @@ cat > ${PROJECT_NAME}/manifests/overlays/production/kustomization.yaml << 'EOF'
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: davtro
+namespace: davtro02
 
 resources:
   - ../../base
@@ -1916,7 +1916,7 @@ cat > ${PROJECT_NAME}/manifests/overlays/staging/kustomization.yaml << 'EOF'
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: davtro-staging
+namespace: davtro02-staging
 
 resources:
   - ../../base
@@ -1952,7 +1952,7 @@ spec:
     path: manifests/overlays/production
   destination:
     server: https://kubernetes.default.svc
-    namespace: davtro
+    namespace: davtro02
   syncPolicy:
     automated:
       prune: true
