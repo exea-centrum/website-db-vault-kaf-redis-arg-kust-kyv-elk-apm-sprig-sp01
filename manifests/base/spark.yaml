@@ -15,8 +15,8 @@ spec:
         fsGroup: 1001
       containers:
         - name: spark-master
-          image: bitnami/spark:3.5
-          command: ["/opt/bitnami/spark/sbin/start-master.sh"]
+          image: apache/spark:3.5.0
+          command: ["/opt/spark/sbin/start-master.sh"]
           ports: [{ containerPort: 7077 }, { containerPort: 8082 }]
           resources:
             requests: { cpu: 100m, memory: 256Mi }
@@ -50,8 +50,8 @@ spec:
         fsGroup: 1001
       containers:
         - name: spark-worker
-          image: bitnami/spark:3.5
-          command: ["/opt/bitnami/spark/sbin/start-worker.sh", "spark://spark-master-svc:7077"]
+          image: apache/spark:3.5.0
+          command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-master-svc:7077"]
           env:
             - { name: SPARK_WORKER_CORES, value: "1" }
             - { name: SPARK_WORKER_MEMORY, value: "1g" }
