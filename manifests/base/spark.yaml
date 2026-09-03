@@ -18,9 +18,13 @@ spec:
           image: apache/spark:3.5.0
           command: ["/opt/spark/sbin/start-master.sh"]
           ports: [{ containerPort: 7077 }, { containerPort: 8082 }]
+          volumeMounts:
+            - { name: spark-logs, mountPath: /opt/spark/logs }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: 500m, memory: 768Mi }
+      volumes:
+        - { name: spark-logs, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service
@@ -52,9 +56,13 @@ spec:
         - name: spark-worker
           image: apache/spark:3.5.0
           command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-master-svc:7077"]
+          volumeMounts:
+            - { name: spark-logs, mountPath: /opt/spark/logs }
           env:
             - { name: SPARK_WORKER_CORES, value: "1" }
             - { name: SPARK_WORKER_MEMORY, value: "1g" }
           resources:
             requests: { cpu: 100m, memory: 512Mi }
             limits: { cpu: 500m, memory: 1Gi }
+      volumes:
+        - { name: spark-logs, emptyDir: {} }
