@@ -59,7 +59,7 @@ metadata:
   name: kafka-topic-job
   namespace: davtro02
   annotations:
-    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   ttlSecondsAfterFinished: 300
