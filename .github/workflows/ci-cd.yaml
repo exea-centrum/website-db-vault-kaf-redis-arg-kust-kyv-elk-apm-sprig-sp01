@@ -110,7 +110,9 @@ jobs:
           token: ${{ secrets.GHCR_PAT_02 }}
       - name: Set new image tags via Kustomize
         run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           cd manifests/base
           ../../kustomize edit set image \
             ${{ env.IMAGE_BASE }}=${{ env.IMAGE_BASE }}:${{ github.sha }} \
