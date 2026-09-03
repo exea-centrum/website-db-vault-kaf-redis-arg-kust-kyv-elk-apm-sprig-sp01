@@ -55,8 +55,15 @@ kind: Job
 metadata:
   name: kafka-topic-job
   namespace: davtro02
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
+  ttlSecondsAfterFinished: 300
   template:
+    metadata:
+      labels:
+        app: kafka-topic-init
     spec:
       serviceAccountName: kafka-job-sa
       restartPolicy: OnFailure
