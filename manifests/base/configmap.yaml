@@ -4,7 +4,7 @@ metadata:
   name: fastapi-config
   namespace: davtro02
 data:
-  DB_HOST: "postgres-db"
+  DB_HOST: "postgres-clusterip"
   DB_PORT: "5432"
   DB_NAME: "davtro_rentals"
   REDIS_HOST: "redis"

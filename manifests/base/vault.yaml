@@ -18,6 +18,7 @@ spec:
           args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
           ports: [{ containerPort: 8200 }]
           env:
+            - { name: VAULT_SKIP_SETCAP, value: "true" }
             - name: VAULT_DEV_ROOT_TOKEN_ID
               valueFrom: { secretKeyRef: { name: davtro-secrets, key: VAULT_ROOT_TOKEN, optional: true } }
           resources:

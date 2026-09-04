@@ -20,7 +20,7 @@ spec:
           envFrom:
             - secretRef: { name: davtro-secrets }
           env:
-            - { name: DB_HOST, value: "postgres-db" }
+            - { name: DB_HOST, value: "postgres-clusterip" }
             - { name: DB_NAME, value: "davtro_rentals" }
             - { name: KAFKA_BOOTSTRAP, value: "kafka-kraft:9092" }
           resources:
