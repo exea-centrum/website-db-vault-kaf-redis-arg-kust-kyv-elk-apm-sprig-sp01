@@ -27,6 +27,9 @@ spec:
           securityContext:
             runAsUser: 0
             runAsGroup: 0
+            # celowo root: nadpisuje runAsNonRoot z poziomu poda,
+            # inaczej kubelet odrzuca initContainer ("breaks non-root policy")
+            runAsNonRoot: false
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data
