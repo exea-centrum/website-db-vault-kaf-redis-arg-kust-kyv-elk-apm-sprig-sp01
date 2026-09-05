@@ -16,6 +16,9 @@ env:
 
 jobs:
   build-fastapi:
+    # Pomin build dla commitow bota CI - inaczej kazdy bot-commit
+    # uruchamia nowy build i kolejny bot-commit = nieskonczona petla.
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +37,7 @@ jobs:
             ${{ env.IMAGE_BASE }}:${{ github.sha }}
 
   build-consumer:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +56,7 @@ jobs:
             ${{ env.IMAGE_BASE }}-consumer:${{ github.sha }}
 
   build-spring:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +81,7 @@ jobs:
             ${{ env.IMAGE_BASE }}-spring:${{ github.sha }}
 
   build-spark:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +108,7 @@ jobs:
             ${{ env.IMAGE_BASE }}-spark:${{ github.sha }}
 
   update-manifests:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     needs: [build-fastapi, build-consumer, build-spring, build-spark]
     steps:
