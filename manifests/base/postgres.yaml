@@ -17,6 +17,22 @@ spec:
         runAsGroup: 999
         fsGroup: 999
         fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # microk8s-hostpath nie stosuje fsGroup - katalog PV zostaje root:root,
+        # przez co initdb (uid 999) nie moze zrobic chmod. Ten initContainer
+        # (celowo jako root) nadaje wlasciciela przed startem postgres.
+        - name: fix-data-permissions
+          image: postgres:16-alpine
+          command: ["sh", "-c", "chown -R 999:999 /var/lib/postgresql/data"]
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
       containers:
         - name: postgres
           image: postgres:16-alpine
