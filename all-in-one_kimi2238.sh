@@ -742,16 +742,16 @@ object MarketingAnalyticsJob {
     val parsedDF = kafkaDF.selectExpr("CAST(value AS STRING) as json").select(from_json($"json", new org.apache.spark.sql.types.StructType().add("event", "string").add("property_id", "integer").add("guest_email", "string").add("booking_value", "double").add("timestamp", "string")).as("data")).select("data.*")
     val aggDF = parsedDF.withWatermark("timestamp", "10 minutes").groupBy(window($"timestamp", "5 minutes"), $"property_id").agg(count("*").as("booking_count"), sum("booking_value").as("total_revenue"), avg("booking_value").as("avg_booking_value"))
     val query = aggDF.writeStream.outputMode("update").format("console").trigger(Trigger.ProcessingTime("10 seconds")).start()
-    val jdbcDF = parsedDF.writeStream.foreachBatch { (batchDF, batchId) => batchDF.write.format("jdbc").option("url", "jdbc:postgresql://postgres-db:5432/davtro_rentals").option("dbtable", "marketing_events").option("user", "davtro").option("password", "changeme").mode("append").save() }.start()
+    val jdbcDF = parsedDF.writeStream.foreachBatch { (batchDF: org.apache.spark.sql.Dataset[org.apache.spark.sql.Row], batchId: Long) => batchDF.write.format("jdbc").option("url", "jdbc:postgresql://postgres-db:5432/davtro_rentals").option("dbtable", "marketing_events").option("user", "davtro").option("password", "changeme").mode("append").save() }.start()
     query.awaitTermination(); jdbcDF.awaitTermination()
   }
 }
 EOF
 
 cat > ${PROJECT_NAME}/spark-jobs/Dockerfile << 'EOF'
-FROM bitnami/spark:3.5.0
-COPY target/scala-2.12/davtro-spark-jobs-assembly-1.0.0.jar /opt/bitnami/spark/jobs/
-CMD ["spark-submit","--class","com.davtro.jobs.MarketingAnalyticsJob","/opt/bitnami/spark/jobs/davtro-spark-jobs-assembly-1.0.0.jar"]
+FROM apache/spark:3.5.0
+COPY target/scala-2.12/davtro-spark-jobs-assembly-1.0.0.jar /opt/spark/jobs/
+CMD ["/opt/spark/bin/spark-submit","--class","com.davtro.jobs.MarketingAnalyticsJob","/opt/spark/jobs/davtro-spark-jobs-assembly-1.0.0.jar"]
 EOF
 
 # ============================================
@@ -788,7 +788,7 @@ metadata:
   name: fastapi-config
   namespace: davtro02
 data:
-  DB_HOST: "postgres-db"
+  DB_HOST: "postgres-clusterip"
   DB_PORT: "5432"
   DB_NAME: "davtro_rentals"
   REDIS_HOST: "redis"
@@ -911,10 +911,29 @@ spec:
       labels: { app: postgres-db }
     spec:
       securityContext:
-        runAsUser: 70
-        runAsGroup: 70
-        fsGroup: 70
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
         fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # microk8s-hostpath nie stosuje fsGroup - katalog PV zostaje root:root,
+        # przez co initdb (uid 999) nie moze zrobic chmod. Ten initContainer
+        # (celowo jako root) nadaje wlasciciela przed startem postgres.
+        - name: fix-data-permissions
+          image: postgres:16-alpine
+          command: ["sh", "-c", "chown -R 999:999 /var/lib/postgresql/data"]
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            # celowo root: nadpisuje runAsNonRoot z poziomu poda,
+            # inaczej kubelet odrzuca initContainer ("breaks non-root policy")
+            runAsNonRoot: false
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -1000,16 +1019,23 @@ spec:
       serviceAccountName: davtro-sa
       securityContext:
         runAsUser: 100
-        runAsGroup: 1000
-        fsGroup: 1000
+        runAsGroup: 100
+        fsGroup: 100
       containers:
         - name: vault
           image: hashicorp/vault:1.17
-          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+          # Bezposrednio vault zamiast docker-entrypoint.sh - entrypoint probuje
+          # setcap (CAP_SETFCAP) i pada w srodowisku bez tej capability.
+          # Dev-mode sam wylacza mlock, wiec setcap nie jest potrzebny.
+          command: ["vault", "server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
           ports: [{ containerPort: 8200 }]
           env:
+            - { name: VAULT_SKIP_SETCAP, value: "true" }
             - name: VAULT_DEV_ROOT_TOKEN_ID
               valueFrom: { secretKeyRef: { name: davtro-secrets, key: VAULT_ROOT_TOKEN, optional: true } }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 250m, memory: 256Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -1036,23 +1062,29 @@ spec:
     metadata: { labels: { app: kafka-kraft } }
     spec:
       securityContext:
-        runAsUser: 1001
-        runAsGroup: 1001
-        fsGroup: 1001
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: kafka
-          image: bitnami/kafka:3.7
+          image: apache/kafka:3.7.0
           ports: [{ containerPort: 9092 }]
           env:
-            - { name: KAFKA_CFG_NODE_ID, value: "0" }
-            - { name: KAFKA_CFG_PROCESS_ROLES, value: "controller,broker" }
-            - { name: KAFKA_CFG_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093" }
-            - { name: KAFKA_CFG_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka-kraft:9092" }
-            - { name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS, value: "0@kafka-kraft-0.kafka-kraft:9093" }
-            - { name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            - { name: CLUSTER_ID, value: "MkU3OEVBNTcwNTJENDM2Qk" }
+            - { name: KAFKA_NODE_ID, value: "0" }
+            - { name: KAFKA_PROCESS_ROLES, value: "controller,broker" }
+            - { name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka-kraft:9092" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "0@kafka-kraft-0.kafka-kraft:9093" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
+            - { name: KAFKA_LOG_DIRS, value: "/tmp/kraft-combined-logs" }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: 1, memory: 1Gi }
           volumeMounts:
             - name: kafka-data
-              mountPath: /bitnami/kafka
+              mountPath: /tmp/kraft-combined-logs
   volumeClaimTemplates:
     - metadata: { name: kafka-data }
       spec:
@@ -1076,21 +1108,35 @@ kind: Job
 metadata:
   name: kafka-topic-job
   namespace: davtro02
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
+  ttlSecondsAfterFinished: 300
   template:
+    metadata:
+      labels:
+        app: kafka-topic-init
     spec:
       serviceAccountName: kafka-job-sa
       restartPolicy: OnFailure
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: kafka-topic-init
-          image: bitnami/kafka:3.7
+          image: apache/kafka:3.7.0
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 200m, memory: 256Mi }
           command:
             - /bin/bash
             - -c
             - |
-              kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic bookings-created --partitions 3 --replication-factor 1
-              kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic email-invoices --partitions 3 --replication-factor 1
-              kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic marketing-actions --partitions 3 --replication-factor 1
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic bookings-created --partitions 3 --replication-factor 1
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic email-invoices --partitions 3 --replication-factor 1
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-kraft:9092 --create --if-not-exists --topic marketing-actions --partitions 3 --replication-factor 1
 EOF
 
 cat > ${PROJECT_NAME}/manifests/base/message-processor.yaml << 'EOF'
@@ -1144,7 +1190,7 @@ spec:
           envFrom:
             - secretRef: { name: davtro-secrets }
           env:
-            - { name: DB_HOST, value: "postgres-db" }
+            - { name: DB_HOST, value: "postgres-clusterip" }
             - { name: DB_NAME, value: "davtro_rentals" }
             - { name: KAFKA_BOOTSTRAP, value: "kafka-kraft:9092" }
           resources:
@@ -1174,14 +1220,21 @@ spec:
     metadata: { labels: { app: spark-master } }
     spec:
       securityContext:
-        runAsUser: 1001
-        runAsGroup: 1001
-        fsGroup: 1001
+        runAsUser: 185
+        runAsGroup: 0
+        fsGroup: 0
       containers:
         - name: spark-master
-          image: bitnami/spark:3.5
-          command: ["/opt/bitnami/spark/sbin/start-master.sh"]
+          image: apache/spark:3.5.0
+          command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "0.0.0.0", "--port", "7077", "--webui-port", "8082"]
           ports: [{ containerPort: 7077 }, { containerPort: 8082 }]
+          volumeMounts:
+            - { name: spark-logs, mountPath: /opt/spark/logs }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 768Mi }
+      volumes:
+        - { name: spark-logs, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service
@@ -1206,16 +1259,23 @@ spec:
     metadata: { labels: { app: spark-worker } }
     spec:
       securityContext:
-        runAsUser: 1001
-        runAsGroup: 1001
-        fsGroup: 1001
+        runAsUser: 185
+        runAsGroup: 0
+        fsGroup: 0
       containers:
         - name: spark-worker
-          image: bitnami/spark:3.5
-          command: ["/opt/bitnami/spark/sbin/start-worker.sh", "spark://spark-master-svc:7077"]
+          image: apache/spark:3.5.0
+          command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master-svc:7077"]
+          volumeMounts:
+            - { name: spark-logs, mountPath: /opt/spark/logs }
           env:
             - { name: SPARK_WORKER_CORES, value: "1" }
             - { name: SPARK_WORKER_MEMORY, value: "1g" }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: 500m, memory: 1Gi }
+      volumes:
+        - { name: spark-logs, emptyDir: {} }
 EOF
 
 cat > ${PROJECT_NAME}/manifests/base/prometheus.yaml << 'EOF'
@@ -1260,6 +1320,9 @@ spec:
           ports: [{ containerPort: 9090 }]
           volumeMounts:
             - { name: config, mountPath: /etc/prometheus }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 256Mi }
       volumes:
         - name: config
           configMap: { name: prometheus-config }
@@ -1295,8 +1358,11 @@ spec:
           image: prometheuscommunity/postgres-exporter:v0.15.0
           env:
             - name: DATA_SOURCE_NAME
-              value: "postgresql://postgres:postgres@postgres-clusterip:5432/davtro?sslmode=disable"
+              value: "postgresql://davtro:changeme@postgres-db:5432/davtro_rentals?sslmode=disable"
           ports: [{ containerPort: 9187 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -1327,6 +1393,9 @@ spec:
           image: danielqsj/kafka-exporter:v1.7.0
           args: ["--kafka.server=kafka-kraft:9092"]
           ports: [{ containerPort: 9308 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -1350,11 +1419,16 @@ spec:
       hostNetwork: true
       hostPID: true
       securityContext:
-        runAsUser: 0
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
       containers:
         - name: node-exporter
           image: prom/node-exporter:v1.8.2
           ports: [{ containerPort: 9100 }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -1421,6 +1495,9 @@ spec:
           volumeMounts:
             - { name: datasource, mountPath: /etc/grafana/provisioning/datasources }
             - { name: dashboards, mountPath: /etc/grafana/provisioning/dashboards-data }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
       volumes:
         - name: datasource
           configMap: { name: grafana-datasource }
@@ -1504,6 +1581,9 @@ spec:
               mountPath: /loki
             - name: config
               mountPath: /etc/loki
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
       volumes:
         - name: data
           emptyDir: {}
@@ -1555,7 +1635,9 @@ spec:
     spec:
       serviceAccountName: davtro-sa
       securityContext:
-        runAsUser: 0
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
       containers:
         - name: promtail
           image: grafana/promtail:3.1.1
@@ -1564,6 +1646,9 @@ spec:
             - { name: config, mountPath: /etc/promtail }
             - { name: varlog, mountPath: /var/log }
             - { name: pods, mountPath: /var/log/pods, readOnly: true }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 256Mi }
       volumes:
         - name: config
           configMap: { name: promtail-config }
@@ -1611,6 +1696,9 @@ spec:
           ports: [{ containerPort: 3200 }]
           volumeMounts:
             - { name: config, mountPath: /etc/tempo }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }
       volumes:
         - name: config
           configMap: { name: tempo-config }
@@ -1649,6 +1737,9 @@ spec:
             - name: PGADMIN_DEFAULT_PASSWORD
               valueFrom: { secretKeyRef: { name: davtro-secrets, key: DB_PASSWORD } }
           ports: [{ containerPort: 80 }]
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -1683,6 +1774,9 @@ spec:
             - { name: KAFKA_CLUSTERS_0_NAME, value: davtro }
             - { name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS, value: "kafka-kraft:9092" }
           ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -1848,42 +1942,48 @@ cat > ${PROJECT_NAME}/manifests/base/kustomization.yaml << 'EOF'
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-resources:
-  - namespace.yaml
-  - serviceaccount.yaml
-  - configmap.yaml
-  - secret.yaml
-  - deployment.yaml
-  - service.yaml
-  - hpa.yaml
-  - pdb.yaml
-  - postgres.yaml
-  - redis.yaml
-  - vault.yaml
-  - kafka.yaml
-  - message-processor.yaml
-  - spring-app.yaml
-  - spark.yaml
-  - prometheus.yaml
-  - exporters.yaml
   # - service-monitors.yaml  # odkomentuj jesli zainstalowany Prometheus Operator
-  - grafana.yaml
-  - loki.yaml
-  - promtail.yaml
-  - tempo.yaml
-  - pgadmin.yaml
-  - kafka-ui.yaml
-  - network-policies.yaml
-  - ingress.yaml
-  - kyverno-policy.yaml
+resources:
+- namespace.yaml
+- serviceaccount.yaml
+- configmap.yaml
+- secret.yaml
+- deployment.yaml
+- service.yaml
+- hpa.yaml
+- pdb.yaml
+- postgres.yaml
+- redis.yaml
+- vault.yaml
+- kafka.yaml
+- message-processor.yaml
+- spring-app.yaml
+- spark.yaml
+- prometheus.yaml
+- exporters.yaml
+- grafana.yaml
+- loki.yaml
+- promtail.yaml
+- tempo.yaml
+- pgadmin.yaml
+- kafka-ui.yaml
+- network-policies.yaml
+- ingress.yaml
+- kyverno-policy.yaml
 
 images:
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
-    newTag: latest
-  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
-    newTag: latest
+- name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
+  newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
+  newTag: 3e4abb5c0cd82ded66f4dc55644784f5c0bd1698
+- name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
+  newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
+  newTag: 3e4abb5c0cd82ded66f4dc55644784f5c0bd1698
+- name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
+  newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
+  newTag: 3e4abb5c0cd82ded66f4dc55644784f5c0bd1698
+- name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
+  newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
+  newTag: 3e4abb5c0cd82ded66f4dc55644784f5c0bd1698
 EOF
 
 # ============================================
@@ -1959,6 +2059,7 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - Replace=true
 EOF
 
 # ============================================
@@ -1968,7 +2069,7 @@ EOF
 cat > ${PROJECT_NAME}/terraform/main.tf << 'EOF'
 terraform {
   cloud {
-    organization = "davtro"
+    organization = "davtro02"
     workspaces { name = "github-actions-terraform" }
   }
   required_providers {
@@ -2026,6 +2127,10 @@ env:
 
 jobs:
   build-fastapi:
+    # Pomin build dla commitow bota CI - inaczej kazdy bot-commit
+    # uruchamia nowy build i kolejny bot-commit = nieskonczona petla.
+    # Autor commita (nie actor - bo push idzie PAT-em usera).
+    if: github.event.head_commit.author.username != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -2033,7 +2138,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT_02 }}
       - uses: docker/build-push-action@v6
         with:
           context: ./backend-fastapi
@@ -2044,6 +2149,7 @@ jobs:
             ${{ env.IMAGE_BASE }}:${{ github.sha }}
 
   build-consumer:
+    if: github.event.head_commit.author.username != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -2051,7 +2157,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT_02 }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -2062,54 +2168,76 @@ jobs:
             ${{ env.IMAGE_BASE }}-consumer:${{ github.sha }}
 
   build-spring:
+    if: github.event.head_commit.author.username != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT_02 }}
+      - name: Build Spring Boot application
+        run: mvn -f java-app/pom.xml clean package -DskipTests
       - uses: docker/build-push-action@v6
         with:
           context: ./java-app
+          file: ./java-app/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_BASE }}-spring:latest
             ${{ env.IMAGE_BASE }}-spring:${{ github.sha }}
 
   build-spark:
+    if: github.event.head_commit.author.username != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: sbt/setup-sbt@v1
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT_02 }}
+      - name: Build Spark assembly
+        working-directory: ./spark-jobs
+        run: sbt -batch clean assembly
       - uses: docker/build-push-action@v6
         with:
           context: ./spark-jobs
+          file: ./spark-jobs/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_BASE }}-spark:latest
             ${{ env.IMAGE_BASE }}-spark:${{ github.sha }}
 
   update-manifests:
+    if: github.event.head_commit.author.username != 'github-actions[bot]'
     runs-on: ubuntu-latest
     needs: [build-fastapi, build-consumer, build-spring, build-spark]
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GHCR_PAT_02 }}
       - name: Set new image tags via Kustomize
         run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           cd manifests/base
           ../../kustomize edit set image \
             ${{ env.IMAGE_BASE }}=${{ env.IMAGE_BASE }}:${{ github.sha }} \
             ${{ env.IMAGE_BASE }}-consumer=${{ env.IMAGE_BASE }}-consumer:${{ github.sha }} \
-            ${{ env.IMAGE_BASE }}-spring=${{ env.IMAGE_BASE }}-spring:${{ github.sha }}
+            ${{ env.IMAGE_BASE }}-spring=${{ env.IMAGE_BASE }}-spring:${{ github.sha }} \
+            ${{ env.IMAGE_BASE }}-spark=${{ env.IMAGE_BASE }}-spark:${{ github.sha }}
       - name: Commit updated manifests
         run: |
           git config user.name "github-actions[bot]"
@@ -2175,17 +2303,17 @@ echo "=== DavTro Setup ==="
 echo "1. Upewnij sie, ze masz zainstalowane: docker, kubectl, kustomize, helm (opcjonalnie)"
 echo "2. Zbuduj obrazy: docker build -t davtro-fastapi ./backend-fastapi"
 echo "3. Zastosuj manifesty: kubectl apply -k manifests/overlays/production"
-echo "4. Sprawdz status: kubectl get pods -n davtro"
+echo "4. Sprawdz status: kubectl get pods -n davtro02"
 EOF
 chmod +x ${PROJECT_NAME}/scripts/setup.sh
 
 cat > ${PROJECT_NAME}/scripts/port-forward.sh << 'EOF'
 #!/bin/bash
 echo "Port-forwarding uslug DavTro..."
-kubectl port-forward svc/fastapi-web-app-svc 8080:80 -n davtro &
-kubectl port-forward svc/grafana 3000:3000 -n davtro &
-kubectl port-forward svc/prometheus 9090:9090 -n davtro &
-kubectl port-forward svc/kafka-ui 8081:80 -n davtro &
+kubectl port-forward svc/fastapi-web-app-svc 8080:80 -n davtro02 &
+kubectl port-forward svc/grafana 3000:3000 -n davtro02 &
+kubectl port-forward svc/prometheus 9090:9090 -n davtro02 &
+kubectl port-forward svc/kafka-ui 8081:80 -n davtro02 &
 echo "FastAPI: http://localhost:8080"
 echo "Grafana: http://localhost:3000"
 echo "Prometheus: http://localhost:9090"
@@ -2227,11 +2355,63 @@ kubectl apply -f argocd/application.yaml -n argocd
 ```
 Push do `main` → GitHub Actions buduje obrazy → Kustomize aktualizuje tagi → ArgoCD sync.
 
+### Dostep ArgoCD do prywatnego repozytorium GitHub
+
+ArgoCD musi miec osobne dane dostepowe do prywatnego repozytorium. Tokenu nie
+wpisuj do tego repozytorium ani do `application.yaml`. Utworz secret w
+namespace `argocd` z tokenem GitHub (PAT powinien miec co najmniej `Contents:
+Read`):
+
+```bash
+read -s GITHUB_PAT
+export GITHUB_PAT
+kubectl create secret generic davtro-github-repo \
+	-n argocd \
+	--from-literal=type=git \
+	--from-literal=url=https://github.com/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01.git \
+	--from-literal=username=exea-centrum \
+	--from-literal=password="$GITHUB_PAT" \
+	--dry-run=client -o yaml |
+	kubectl label -f - argocd.argoproj.io/secret-type=repository --local -o yaml |
+	kubectl apply -f -
+unset GITHUB_PAT
+```
+
+Nastepnie odswiez ArgoCD:
+
+```bash
+kubectl annotate application davtro-website -n argocd \
+	argocd.argoproj.io/refresh=hard --overwrite
+kubectl get application davtro-website -n argocd -w
+```
+
 ## WAZNE – przed produkcja
 - Zamien Vault dev-mode na oficjalny Helm chart (HA + auto-unseal)
 - Skonfiguruj ArgoCD Vault Plugin (AVP) dla sekretow
 - Skonfiguruj realny SMTP w secretach
 - Zainstaluj Prometheus Operator jesli chcesz uzyc ServiceMonitor
+Completed
+
+Wdrożenie naprawione — wszystko stoi. Ostateczny status:
+
+Klaster davtro02 (po Twoim usunięciu poda postgres)
+Komponent	Status
+postgres-db-0	✅ 1/1 Running — initContainer (root, runAsNonRoot: false) → chown 999:999 → initdb OK
+fastapi (3/3 pody)	✅ 1/1 Running — nowa wersja, readiness /api/health przechodzi
+spring-app	✅ 1/1 Running
+vault-0	✅ 1/1 Running (dev-mode bez entrypointa)
+message-processor, kafka-kraft, redis	✅ 1/1 Running
+observability (prometheus, grafana, loki, tempo, promtail, exporters, pgadmin)	✅ 1/1 Running
+ArgoCD	sync=Synced, health=Progressing — dokańcza operację
+Co naprawiliśmy (przez Twój flow GitOps — 5 commitów)
+postgres — root-owned PV na microk8s-hostpath (fsGroup nie działa) → initContainer robiący chown 999:999 + runAsNonRoot: false na poziomie kontenera (kubelet odrzucał root-init)
+vault — CAP_SETFCAP: Operation not permitted → ominięcie docker-entrypoint.sh (dev-mode nie potrzebuje setcap/mlock)
+kafka-topic-job — runAsNonRoot bez numerycznego UID → runAsUser: 1000 (wejdzie z PostSync hook)
+pętla CI — bot commitował → build → bot commit… → warunek head_commit.author.username != 'github-actions[bot]'
+Ostatni detal
+kafka-topic-job (PostSync hook) zostanie odtworzony, gdy ArgoCD uzna stan za zdrowy — dzięki hook-delete-policy: BeforeHookCreation stary, padnięty job już usunął (NotFound = normalne). Jeśli op wisi bardzo długo na Ingressie (cecha microk8s — brak adresu LB), tematy Kafka i tak utworzą się automatycznie przy pierwszym połączeniu producenta (auto.create.topics domyślnie on).
+
+Gdybyś chciał, w folderze mogę jeszcze (za Twoją akceptacją) dopiąć: pominięcie blokady syncu na Ingressie (np. ignoreDifferences/health check) albo porządki w pupa.txt. Ale technicznie — misja wykonana
 EOF
 
 # ============================================
