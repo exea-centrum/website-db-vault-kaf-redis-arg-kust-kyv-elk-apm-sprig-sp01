@@ -3,6 +3,8 @@ kind: Ingress
 metadata:
   name: davtro-ingress
   namespace: davtro02
+  annotations:
+    argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   ingressClassName: public
   rules:
@@ -35,6 +37,8 @@ kind: Ingress
 metadata:
   name: spark-ingress
   namespace: davtro02
+  annotations:
+    argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   ingressClassName: public
   rules:
