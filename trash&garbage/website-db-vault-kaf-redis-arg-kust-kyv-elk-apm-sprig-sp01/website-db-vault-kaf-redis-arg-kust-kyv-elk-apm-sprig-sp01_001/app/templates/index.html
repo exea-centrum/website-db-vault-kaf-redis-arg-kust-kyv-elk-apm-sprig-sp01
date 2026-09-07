@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Davtro Apartments - Wynajem Krótkoterminowy</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white min-h-screen">
+
+<header class="border-b border-purple-500/30 backdrop-blur-sm bg-black/20">
+  <div class="container mx-auto px-6 py-6 flex items-center justify-between flex-wrap gap-4">
+    <div class="flex items-center gap-3">
+      <svg class="w-10 h-10 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9.5L12 3l9 6.5V21H3V9.5z"></path>
+      </svg>
+      <h1 class="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+        Davtro Apartments
+      </h1>
+    </div>
+    <nav class="flex gap-4">
+      <button onclick="showTab('offer')" class="tab-btn px-4 py-2 rounded-lg text-purple-300" data-tab="offer">Oferta</button>
+      <button onclick="showTab('booking')" class="tab-btn px-4 py-2 rounded-lg text-purple-300" data-tab="booking">Rezerwacja</button>
+      <button onclick="showTab('contact')" class="tab-btn px-4 py-2 rounded-lg text-purple-300" data-tab="contact">Kontakt</button>
+    </nav>
+  </div>
+</header>
+
+<main class="container mx-auto px-6 py-12">
+
+  <div id="offer-tab" class="tab-content">
+    <div class="space-y-8 animate-fade-in">
+      <div class="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-lg border border-purple-500/20 rounded-2xl p-8">
+        <h2 class="text-4xl font-bold mb-6 text-purple-300">Mieszkania na wynajem krótkoterminowy</h2>
+        <p class="text-lg text-gray-300 leading-relaxed">
+          Komfortowe apartamenty w centrum miasta. Sprawdź dostępność w kalendarzu
+          i zarezerwuj termin online. Po rezerwacji otrzymasz potwierdzenie
+          oraz fakturę proforma na e-mail.
+        </p>
+      </div>
+      <div id="apartments-grid" class="grid md:grid-cols-3 gap-6">
+        <!-- wypełniane przez apartments.js z /api/apartments -->
+      </div>
+    </div>
+  </div>
+
+  <div id="booking-tab" class="tab-content hidden">
+    <div class="space-y-6 animate-fade-in">
+      <h2 class="text-4xl font-bold mb-8 text-purple-300">Rezerwacja</h2>
+      <div class="bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-lg border border-purple-500/20 rounded-xl p-6">
+        <div id="calendar" class="mb-6"></div>
+        <form id="booking-form" class="grid md:grid-cols-2 gap-4">
+          <input type="hidden" id="apartment-id" value="1" />
+          <div>
+            <label class="block text-gray-400 mb-2">Data od</label>
+            <input required type="date" id="date-from" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
+          </div>
+          <div>
+            <label class="block text-gray-400 mb-2">Data do</label>
+            <input required type="date" id="date-to" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
+          </div>
+          <div>
+            <label class="block text-gray-400 mb-2">Imię i nazwisko</label>
+            <input required type="text" id="guest-name" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
+          </div>
+          <div>
+            <label class="block text-gray-400 mb-2">Email</label>
+            <input required type="email" id="guest-email" class="w-full py-3 px-4 rounded-lg bg-slate-700 border border-purple-500/30 outline-none" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="flex items-center gap-2 text-gray-400">
+              <input type="checkbox" id="marketing-consent" />
+              Chcę otrzymywać oferty marketingowe (newsletter)
+            </label>
+          </div>
+          <div class="md:col-span-2">
+            <button type="submit" class="w-full py-3 px-4 rounded-lg bg-purple-500 hover:bg-purple-600 transition-all">
+              Zarezerwuj i wyślij potwierdzenie
+            </button>
+          </div>
+        </form>
+        <p id="booking-result" class="mt-4 text-purple-300"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="contact-tab" class="tab-content hidden">
+    <div class="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-lg border border-purple-500/20 rounded-2xl p-8">
+      <h2 class="text-4xl font-bold mb-6 text-purple-300">Kontakt</h2>
+      <p class="text-gray-300">Davtro Apartments · biuro@davtro.pl</p>
+    </div>
+  </div>
+
+</main>
+
+<footer class="border-t border-purple-500/30 backdrop-blur-sm bg-black/20 mt-16">
+  <div class="container mx-auto px-6 py-8 text-center text-gray-400">
+    <p>Davtro Apartments © 2026</p>
+  </div>
+</footer>
+
+<script src="/static/script.js"></script>
+</body>
+</html>

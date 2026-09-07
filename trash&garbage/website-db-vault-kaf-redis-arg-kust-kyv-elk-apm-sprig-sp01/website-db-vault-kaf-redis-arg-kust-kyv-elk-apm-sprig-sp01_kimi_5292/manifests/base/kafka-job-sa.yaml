@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka-job-sa
+  namespace: davtro
+  labels:
+    app: 
+    component: kafka-topic-job
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-config
+  namespace: davtro
+  labels:
+    app: 
+    component: fastapi
+    app.kubernetes.io/name: 
+    app.kubernetes.io/instance: 
+    app.kubernetes.io/component: fastapi
+data:
+  APP_NAME: ""
+  APP_ENV: "production"
+  PYTHONUNBUFFERED: "1"

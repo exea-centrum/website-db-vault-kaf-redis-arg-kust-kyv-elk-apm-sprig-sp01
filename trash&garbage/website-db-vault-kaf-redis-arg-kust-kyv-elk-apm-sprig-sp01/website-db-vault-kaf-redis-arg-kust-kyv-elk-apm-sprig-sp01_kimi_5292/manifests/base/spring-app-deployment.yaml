@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spring-app
+  namespace: davtro
+  labels:
+    app: 
+    component: spring-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: 
+      component: spring-app
+  template:
+    metadata:
+      labels:
+        app: 
+        component: spring-app
+    spec:
+      initContainers:
+        - name: wait-for-mongodb
+          image: mongo:7.0
+          command: ['mongosh', '--host', 'mongodb', '--eval', 'db.adminCommand("ping")']
+        - name: wait-for-kafka
+          image: confluentinc/cp-kafka:7.5.0
+          command: 
+            - sh
+            - -c
+            - |
+              until kafka-broker-api-versions --bootstrap-server kafka:9092; do
+                echo "Waiting for Kafka..."
+                sleep 5
+              done
+        - name: wait-for-elasticsearch
+          image: busybox:1.35
+          command: 
+            - sh
+            - -c
+            - |
+              until wget -q -O- http://elasticsearch:9200; do
+                echo "Waiting for Elasticsearch..."
+                sleep 5
+              done
+      containers:
+        - name: spring-app
+          image: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATA_MONGODB_URI
+              value: "mongodb://survey_user:survey_password@mongodb:27017/survey_db?authSource=survey_db"
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: ELASTICSEARCH_URL
+              value: "http://elasticsearch:9200"
+            - name: LOGSTASH_URL
+              value: "http://logstash:5000"
+            - name: JAVA_OPTS
+              value: "-Xms512m -Xmx512m -XX:+UseG1GC"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spring-app-service
+  namespace: davtro
+  labels:
+    app: 
+    component: spring-app
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: 
+    component: spring-app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spring-app-config
+  namespace: davtro
+  labels:
+    app: 
+    component: spring-app
+data:
+  application.yml: |
+    spring:
+      data:
+        mongodb:
+          uri: mongodb://survey_user:survey_password@mongodb:27017/survey_db?authSource=survey_db
+          auto-index-creation: true
+      
+      kafka:
+        bootstrap-servers: kafka:9092
+        producer:
+          key-serializer: org.apache.kafka.common.serialization.StringSerializer
+          value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+        consumer:
+          group-id: spring-survey-group
+          key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+          value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+          properties:
+            spring.json.trusted.packages: "*"
+    
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics,prometheus
+      metrics:
+        export:
+          prometheus:
+            enabled: true
+    
+    logging:
+      level:
+        com.davtroweb: DEBUG
+      file:
+        name: /var/log/spring-app.log
+    
+    elk:
+      elasticsearch-url: http://elasticsearch:9200
+      logstash-url: http://logstash:5000
+    
+    spark:
+      master-url: spark://spark-master:7077

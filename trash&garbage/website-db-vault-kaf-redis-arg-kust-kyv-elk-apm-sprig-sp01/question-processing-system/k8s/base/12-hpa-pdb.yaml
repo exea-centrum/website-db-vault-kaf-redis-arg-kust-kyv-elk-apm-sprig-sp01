@@ -1,0 +1,41 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-hpa
+  namespace: question-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fastapi-pdb
+  namespace: question-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: fastapi-app
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: message-processor-pdb
+  namespace: question-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: message-processor
