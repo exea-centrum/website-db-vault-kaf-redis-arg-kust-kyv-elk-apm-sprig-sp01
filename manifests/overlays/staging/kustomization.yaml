@@ -13,6 +13,8 @@ images:
     newTag: staging
   - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
     newTag: staging
+  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
+    newTag: staging
 
 replicas:
   - name: fastapi-web-app

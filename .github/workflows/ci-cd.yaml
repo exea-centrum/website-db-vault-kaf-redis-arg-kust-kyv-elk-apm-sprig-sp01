@@ -37,6 +37,25 @@ jobs:
             ${{ env.IMAGE_BASE }}:latest
             ${{ env.IMAGE_BASE }}:${{ github.sha }}
 
+  build-frontend:
+    if: github.event.head_commit.author.username != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT_02 }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-frontend:latest
+            ${{ env.IMAGE_BASE }}-frontend:${{ github.sha }}
+
   build-consumer:
     if: github.event.head_commit.author.username != 'github-actions[bot]'
     runs-on: ubuntu-latest
@@ -111,7 +130,7 @@ jobs:
   update-manifests:
     if: github.event.head_commit.author.username != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    needs: [build-fastapi, build-consumer, build-spring, build-spark]
+    needs: [build-fastapi, build-frontend, build-consumer, build-spring, build-spark]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -124,6 +143,7 @@ jobs:
           cd manifests/base
           ../../kustomize edit set image \
             ${{ env.IMAGE_BASE }}=${{ env.IMAGE_BASE }}:${{ github.sha }} \
+            ${{ env.IMAGE_BASE }}-frontend=${{ env.IMAGE_BASE }}-frontend:${{ github.sha }} \
             ${{ env.IMAGE_BASE }}-consumer=${{ env.IMAGE_BASE }}-consumer:${{ github.sha }} \
             ${{ env.IMAGE_BASE }}-spring=${{ env.IMAGE_BASE }}-spring:${{ github.sha }} \
             ${{ env.IMAGE_BASE }}-spark=${{ env.IMAGE_BASE }}-spark:${{ github.sha }}

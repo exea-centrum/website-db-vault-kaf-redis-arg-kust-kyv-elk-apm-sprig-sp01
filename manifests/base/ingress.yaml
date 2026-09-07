@@ -9,10 +9,14 @@ spec:
     - host: davtro.local
       http:
         paths:
-          - path: /
+          - path: /api
             pathType: Prefix
             backend:
               service: { name: fastapi-web-app-svc, port: { number: 80 } }
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: frontend-svc, port: { number: 80 } }
           - path: /grafana
             pathType: Prefix
             backend:

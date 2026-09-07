@@ -9,6 +9,7 @@ resources:
 - secret.yaml
 - deployment.yaml
 - service.yaml
+- frontend.yaml
 - hpa.yaml
 - pdb.yaml
 - postgres.yaml
@@ -37,6 +38,9 @@ images:
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
   newTag: d834aba72589d2b0641ae3abdc23e09bee877a74
+- name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
+  newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
+  newTag: latest
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
   newTag: d834aba72589d2b0641ae3abdc23e09bee877a74

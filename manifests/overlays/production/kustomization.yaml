@@ -13,6 +13,8 @@ images:
     newTag: latest
   - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
     newTag: latest
+  - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
+    newTag: latest
 
 replicas:
   - name: fastapi-web-app
