@@ -55,22 +55,10 @@ jobs:
           tags: |
             ${{ env.IMAGE_BASE }}-frontend:latest
             ${{ env.IMAGE_BASE }}-frontend:${{ github.sha }}
-      - name: Make GHCR frontend package public (cluster pulls anonymously)
-        continue-on-error: true
-        run: |
-          PKG=website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
-          echo "--- visibility before:"
-          curl -s -H "Authorization: Bearer ${{ secrets.GHCR_PAT_02 }}" \
-            https://api.github.com/user/packages/container/$PKG | grep -E '"visibility"|"message"' || true
-          echo "--- change-visibility POST:"
-          curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.GHCR_PAT_02 }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/user/packages/container/$PKG/change-visibility" \
-            -d '{"visibility":"public"}' -w "\nHTTP: %{http_code}\n" || true
-          echo "--- visibility after:"
-          curl -s -H "Authorization: Bearer ${{ secrets.GHCR_PAT_02 }}" \
-            https://api.github.com/user/packages/container/$PKG | grep -E '"visibility"|"message"' || true
+      # UWAGA: widocznosc pakietu GHCR NIE da sie zmienic przez REST API
+      # (POST .../change-visibility -> 404). Pierwszy raz pakiet trzeba
+      # ustawic jako PUBLIC recznie w UI GitHuba (Package settings ->
+      # Danger Zone -> Change visibility). Potem widocznosc zostaje.
 
   build-consumer:
     if: github.event.head_commit.author.username != 'github-actions[bot]'
