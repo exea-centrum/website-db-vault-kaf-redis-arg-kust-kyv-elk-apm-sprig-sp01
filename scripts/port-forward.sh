@@ -13,7 +13,19 @@
 
 ADDR="${ADDR:-0.0.0.0}"
 
-echo "Port-forwarding uslug DavTro na $ADDR ..."
+# Binarka kubectl: zwykly kubectl albo microk8s (snap) - niezaleznie od PATH
+if command -v kubectl >/dev/null 2>&1; then
+  KC="kubectl"
+elif [ -x /snap/bin/microk8s ]; then
+  KC="/snap/bin/microk8s kubectl"
+elif [ -x /snap/microk8s/current/kubectl ]; then
+  KC="/snap/microk8s/current/kubectl"
+else
+  echo "BLAD: nie znaleziono 'kubectl' ani 'microk8s' (snap)" >&2
+  exit 1
+fi
+
+echo "Port-forwarding uslug DavTro na $ADDR ... (kubectl: $KC)"
 
 #              local:target-branch   |  usluga / opis
 # ---------------------------------------------------------
@@ -39,7 +51,7 @@ echo "Port-forwarding uslug DavTro na $ADDR ..."
 
 start() {
   local NAME="$1" LOCAL="$2" SVC="$3" TARGET="$4"
-  kubectl port-forward --address "$ADDR" -n davtro02 "svc/$SVC" "$LOCAL:$TARGET" >"/tmp/pf-$NAME.log" 2>&1 &
+  $KC port-forward --address "$ADDR" -n davtro02 "svc/$SVC" "$LOCAL:$TARGET" >"/tmp/pf-$NAME.log" 2>&1 &
   echo "  $NAME: http://<IP>:${LOCAL}/  -> $SVC:$TARGET"
 }
 
