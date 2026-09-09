@@ -1,16 +1,15 @@
-# KROK 3.5 (v2): pelna automatyzacja bootstrapu Vaulta - Deployment z petla self-heal
-# (60s) zamiast Joba-hooka: nie zawala syncu ArgoCD i leczy stan PO kazdym restarcie.
-# Petla zapewnia (idempotentnie):
+# KROK 3.5 (v3): pelna automatyzacja bootstrapu Vaulta - Deployment z petla self-heal (60s).
+# Nie zawala syncu ArgoCD (zadnego hooka) i leczy stan po kazdym restarcie/cold-start:
 #   1. brak inicjalizacji -> vault operator init (1 key share); unseal_key + root_token
 #      na PVC /vault/data (plik bootstrap-keys, 600). Trade-off homelab: w produkcji
 #      auto-unseal (cloud KMS / transit).
 #   2. sealed -> unseal z pliku
 #   3. audit -> stdout (Loki), KV davtro/db (GENERUJE DB_PASSWORD jesli brak) + smtp
-#   4. auth kubernetes (+ ClusterRoleBinding system:auth-delegator nizej) + policy/role
-#      davtro-apps (dla ESO) i davtro-snapshot (dla CronJoba backupow)
-#   5. database engine + rola davtro-app-rw; jezeli haslo davtro w KV nie pasuje do
-#      dzialajacego Postgresa -> ALIGN: ALTER USER przez kubectl exec (local trust)
-#      + rollout restart pgadmin/postgres-exporter/spring (poda ESO nowe haslo)
+#   4. auth kubernetes (+ ClusterRoleBinding system:auth-delegator) + policy/role
+#      davtro-apps (ESO) i davtro-snapshot (CronJob backupow)
+#   5. database engine + rola davtro-app-rw; jesli haslo davtro w KV nie pasuje do
+#      zywego Postgresa -> ALIGN: ALTER USER przez kubectl exec (local trust), czekanie
+#      az ESO odswiezy davtro-secrets, rollout restart pgadmin/exporter/spring
 # Wymaga: PVC vault-data-vault-0 na tym samym nodzie (RWO, microk8s single-node).
 apiVersion: v1
 kind: ConfigMap
@@ -59,6 +58,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "patch"]
@@ -110,6 +112,7 @@ spec:
               KUBECTL=/share/kubectl
               KEYS=/vault/data/bootstrap-keys
               log() { echo "[bootstrap] $*"; }
+              vfield() { grep -o "$1" | grep -o '[a-z]*$'; }
 
               ensure_one() {
                 n=0
@@ -119,25 +122,35 @@ spec:
                 done
 
                 STATUS=$(vault status -format=json 2>/dev/null || echo '{}')
-                INIT=$(echo "$STATUS" | sed -n 's/.*"initialized": *\([a-z]*\).*/\1/p')
-                SEALED=$(echo "$STATUS" | sed -n 's/.*"sealed": *\([a-z]*\).*/\1/p')
+                INIT=$(echo "$STATUS" | vfield '"initialized": *[a-z]*')
+                SEALED=$(echo "$STATUS" | vfield '"sealed": *[a-z]*')
 
                 if [ "$INIT" != "true" ]; then
                   log "brak inicjalizacji -> vault operator init"
-                  INIT_JSON=$(vault operator init -key-shares=1 -key-threshold=1 -format=json)
-                  UKEY=$(echo "$INIT_JSON" | sed -n 's/.*"unseal_keys_b64":\[\"\([^\"]*\)\".*/\1/p')
-                  RTOKEN=$(echo "$INIT_JSON" | sed -n 's/.*"root_token":"\([^\"]*\)".*/\1/p')
+                  INIT_JSON=$(vault operator init -key-shares=1 -key-threshold=1 -format=json) || { log "init nieudany - retry"; return 1; }
+                  UKEY=$(echo "$INIT_JSON" | grep -o '"unseal_keys_b64":\[[^]]*\]' | tr -d '"[] ')
+                  RTOKEN=$(echo "$INIT_JSON" | grep -o '"root_token": *"[^"]*"' | tr -d '" ')
+                  if [ -z "$UKEY" ] || [ -z "$RTOKEN" ]; then
+                    log "nie udalo sie wyciagnac kluczy z init - retry"
+                    return 1
+                  fi
                   printf '%s\n%s\n' "$UKEY" "$RTOKEN" > "$KEYS"
                   chmod 600 "$KEYS"
                 fi
                 [ -f "$KEYS" ] || { log "brak $KEYS (Vault inicjalizowany recznie) - patrz README: Jednorazowa migracja"; return 1; }
 
+                SEALED=$(vault status -format=json 2>/dev/null | vfield '"sealed": *[a-z]*')
                 if [ "$SEALED" = "true" ]; then
                   log "unseal"
                   vault operator unseal "$(head -n1 "$KEYS")" >/dev/null
                 fi
                 export VAULT_TOKEN="$(tail -n1 "$KEYS")"
-                [ "$(vault status -format=json | sed -n 's/.*"sealed": *\([a-z]*\).*/\1/p')" = "false" ] || return 1
+                n=0
+                until [ "$(vault status -format=json 2>/dev/null | vfield '"sealed": *[a-z]*')" = "false" ]; do
+                  n=$((n + 1)); [ "$n" -ge 30 ] && { log "vault nadal sealed - retry"; return 1; }
+                  sleep 2
+                  vault operator unseal "$(head -n1 "$KEYS")" >/dev/null 2>&1 || true
+                done
 
                 vault audit list 2>/dev/null | grep -q 'file/' || vault audit enable file file_path=stdout
                 vault secrets list 2>/dev/null | grep -q 'davtro/' || vault secrets enable -path=davtro kv-v2
@@ -170,7 +183,7 @@ spec:
                     allowed_roles=davtro-app-rw \
                     connection_url="postgresql://{{username}}:{{password}}@postgres-clusterip.davtro02.svc.cluster.local:5432/davtro_rentals?sslmode=disable" \
                     username=davtro password="$DB_PASSWORD" >/dev/null 2>&1; then
-                  log "database/config odrzucone - ALIGN hasla davtro w Postgresie do wartosci z KV"
+                  log "database/config odrzucone - ALIGN hasla davtro do wartosci z KV"
                   ALIGN=1
                 fi
 
@@ -179,7 +192,7 @@ spec:
                       "ALTER USER davtro WITH PASSWORD '$DB_PASSWORD';" >/dev/null 2>&1; then
                     log "haslo davtro w Postgresie zsynchronizowane z KV"
                   else
-                    log "ALTER USER nieudany (postgres-db-0 jeszcze nie gotowy?) - retry w nastepnej petli"
+                    log "ALTER USER nieudany (postgres-db-0 nie gotowy?) - retry w nastepnej petli"
                     return 1
                   fi
                   vault write database/config/davtro-postgresql \
@@ -187,6 +200,12 @@ spec:
                     allowed_roles=davtro-app-rw \
                     connection_url="postgresql://{{username}}:{{password}}@postgres-clusterip.davtro02.svc.cluster.local:5432/davtro_rentals?sslmode=disable" \
                     username=davtro password="$DB_PASSWORD" >/dev/null
+                  n=0
+                  until [ "$($KUBECTL -n davtro02 get secret davtro-secrets -o jsonpath='{.data.DB_PASSWORD}' 2>/dev/null | base64 -d)" = "$DB_PASSWORD" ]; do
+                    n=$((n + 1)); [ "$n" -ge 40 ] && break
+                    log "czekam az ESO odswiezy davtro-secrets ($n/40)"
+                    sleep 15
+                  done
                   $KUBECTL -n davtro02 rollout restart deploy/pgadmin deploy/postgres-exporter deploy/spring-app-deployment >/dev/null 2>&1 || true
                   log "restart pgadmin/postgres-exporter/spring (nowe haslo z ESO)"
                 fi
