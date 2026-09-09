@@ -11,7 +11,7 @@ KUSTOMIZE_PATH: `./manifests/production`
 3. `message-processor` (`app/consumer.py`) konsumuje event, wysyła e-mail (potwierdzenie + faktura proforma) i aktualizuje status w PostgreSQL.
 4. Zgody marketingowe trafiają do tematu `marketing-events`, konsumowane tak samo, dodatkowo agregowane przez `spark-jobs/marketing_analytics.py`.
 5. `spring-app-deployment` udostępnia panel raportowy/administracyjny na tych samych danych.
-6. Sekrety (SMTP, DB) mają docelowo pochodzić z Vault (patrz `manifests/base/secret.yaml` i sekcja "Vault" niżej), nie z repo.
+6. Sekrety pochodzą z HashiCorp Vault przez External Secrets Operator (ESO) – `secret-store.yaml` + `external-secrets.yaml`; bootstrap Vaulta (init/unseal/KV/auth/database) robi automatycznie Job `vault-bootstrap` (PostSync). Aplikacje Python dostają dynamiczne credsy DB z `database/creds/davtro-app-rw` (rotacja co 30 min).
 
 ## Struktura repo
 ```
@@ -42,8 +42,8 @@ uvicorn app.main:app --reload --port 8080
 4. Push do `main` -> GitHub Actions zbuduje obrazy i zaktualizuje tagi w `manifests/base/kustomization.yaml` -> ArgoCD (auto-sync) wdroży zmiany.
 
 ## WAŻNE – rzeczy do dopracowania przed produkcją
-- `manifests/base/secret.yaml` zawiera placeholdery Vault (`<path:...>`) – wymaga realnej integracji ArgoCD Vault Plugin (AVP), inaczej sekrety trzeba podać ręcznie.
-- Vault jest w trybie `-dev` (dane nietrwałe) – do produkcji podmień na Helm chart HashiCorp Vault z auto-unseal.
+- ~~sekrety w repo~~ ZROBIONE: Vault (raft na PVC) + ESO generują `davtro-secrets`; Job `vault-bootstrap` automatyzuje init/unseal/KV/auth/database po każdym syncu.
+- ~~Vault dev-mode~~ ZROBIONE: storage raft na PVC. Do produkcji HA: Helm chart z auto-unseal (cloud KMS / transit) zamiast klucza unseal na PVC.
 - `service-monitors.yaml` wymaga Prometheus Operatora (CRD `ServiceMonitor`) – jest wyłączony w `kustomization.yaml`, odkomentuj po instalacji operatora.
 - SMTP nie jest skonfigurowany – bez zmiennych `SMTP_*` e-maile tylko logują się do stdout (`app/email_sender.py`).
 - Obrazy produkcyjne CI/CD budują się pod `ghcr.io/<twoja-organizacja>/...` – ustaw `github.repository_owner` zgodnie z Twoim kontem/organizacją.
@@ -61,7 +61,7 @@ Namespace: `davtro`
 3. **message-processor** (consumer) → Kafka → email + PostgreSQL update
 4. **Spring Boot** → panel raportowy / admin
 5. **Spark** → analityka marketingowa z Kafka
-6. **Vault** → sekrety (dev-mode, do produkcji HA)
+6. **Vault** → sekrety (raft + ESO + auto-bootstrap; dynamiczne credsy DB dla FastAPI/consumer)
 7. **Observability** → Prometheus + Grafana + Loki + Tempo
 
 ## Lokalne uruchomienie (dev)
@@ -110,7 +110,37 @@ kubectl get application davtro-website -n argocd -w
 ```
 
 ## WAZNE – przed produkcja
-- Zamien Vault dev-mode na oficjalny Helm chart (HA + auto-unseal)
-- Skonfiguruj ArgoCD Vault Plugin (AVP) dla sekretow
+- ~~Vault dev-mode~~ ZROBIONE (raft + auto-bootstrap); produkcja HA: Helm chart + auto-unseal
+- ~~ArgoCD Vault Plugin (AVP)~~ ZROBIONE inaczej: External Secrets Operator (ESO)
 - Skonfiguruj realny SMTP w secretach
 - Zainstaluj Prometheus Operator jesli chcesz uzyc ServiceMonitor
+
+# Vault: pełna automatyzacja (full-auto cold start)
+
+Usunięcie projektu + wklejenie `argocd/application.yaml` do ArgoCD wystarcza – bez kroków ręcznych:
+
+1. ArgoCD deployuje stack; Job `vault-bootstrap` (PostSync, idempotentny) inicjalizuje i unsealuje Vault (klucze: `/vault/data/bootstrap-keys` na PVC `vault-data-vault-0`), generuje `DB_PASSWORD` do KV `davtro/db`, włącza audit→stdout (Loki), auth kubernetes (+ `system:auth-delegator`), policy/role `davtro-apps`, database engine + rolę `davtro-app-rw` (retry aż Postgres wstanie) oraz `davtro-snapshot`.
+2. ESO tworzy `davtro-secrets` (statyczne KV: db/smtp) → Postgres robi initdb z tym hasłem → ESO tworzy dynamiczne credsy `fastapi-db-creds` / `message-processor-db-creds` z `database/creds/davtro-app-rw` (rotacja co 30 min; aplikacje przełączają pool(e) w locie – `watch_db_creds` / `get_engine()`).
+3. CronJob `vault-snapshot` robi nocny snapshot rafta (logowanie po ServiceAccount, retencja 14 dni).
+
+## Jednorazowa migracja klastra sprzed automatyzacji
+
+Jeżeli Vault był inicjalizowany ręcznie (przed wdrożeniem `vault-bootstrap.yaml`), Job wyexituje z prośbą o plik kluczy. Skonsumuj raz wartości z pierwotnego `vault operator init`:
+
+```bash
+kubectl -n davtro02 exec vault-0 -- sh -c \
+  'printf "%s\n%s\n" "<UNSEAL_KEY>" "<ROOT_TOKEN>" > /vault/data/bootstrap-keys && chmod 600 /vault/data/bootstrap-keys'
+kubectl -n davtro02 delete job vault-bootstrap
+kubectl -n argocd annotate application davtro-website argocd.argoproj.io/refresh=hard --overwrite
+kubectl -n davtro02 logs -f job/vault-bootstrap   # czekaj na "[bootstrap] DONE"
+```
+
+## Weryfikacja Vault + ESO
+
+```bash
+kubectl -n davtro02 get externalsecret                                            # 3x SYNCED=True
+kubectl -n davtro02 exec postgres-db-0 -- psql -U davtro -d davtro_rentals -c '\du'  # userzy v-token-...
+kubectl -n davtro02 logs deploy/fastapi-web-app | grep -i "przelaczono\|creds"
+```
+
+Roadmapa: **Krok 4** = PKI (cert-manager + Vault issuer dla ingress TLS) + GitHub OIDC dla CI; opcjonalnie Transit (szyfrowanie PII w PostgreSQL) i migracja Springa na Spring Cloud Vault.
