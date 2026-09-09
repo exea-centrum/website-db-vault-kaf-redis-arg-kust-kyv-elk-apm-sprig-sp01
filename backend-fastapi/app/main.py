@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import asyncpg
 import redis.asyncio as aioredis
+import asyncio
 import json
 import os
 from datetime import datetime, date
@@ -13,16 +14,63 @@ import uvicorn
 app = FastAPI(title="DavTro Rentals API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-DB_HOST = os.getenv("DB_HOST", "postgres-db")
+DB_HOST = os.getenv("DB_HOST", "postgres-clusterip")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "davtro_rentals")
-DB_USER = os.getenv("DB_USER", "davtro")
-DB_PASS = os.getenv("DB_PASSWORD", "changeme")
+DB_USER_FILE = os.getenv("DB_USER_FILE")
+DB_PASSWORD_FILE = os.getenv("DB_PASSWORD_FILE")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka-kraft:9092")
 
 db_pool = None
+
+
+def _read_creds_file(path):
+    """Odczyt credsyw z pliku montowanego z sekretu ESO (rotowane przez Vault)."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return None
+
+
+def db_creds():
+    """Credsy DB: pliki z Vault (database/creds/davtro-app-rw) albo fallback na env."""
+    user = (_read_creds_file(DB_USER_FILE) if DB_USER_FILE else None) or os.getenv("DB_USER")
+    password = (_read_creds_file(DB_PASSWORD_FILE) if DB_PASSWORD_FILE else None) or os.getenv("DB_PASSWORD")
+    if not user or not password:
+        raise RuntimeError("Brak credsy DB: oczekiwano DB_USER_FILE/DB_PASSWORD_FILE (Vault/ESO) lub DB_USER/DB_PASSWORD")
+    return user, password
+
+
+async def create_db_pool(user, password):
+    return await asyncpg.create_pool(
+        host=DB_HOST, port=DB_PORT, database=DB_NAME,
+        user=user, password=password, min_size=5, max_size=20,
+    )
+
+
+async def watch_db_creds():
+    """Rotacja dynamicznych credsyw z Vault: ESO odswieza sekret co refreshInterval,
+    kubelet aktualizuje pliki w podzie. Po wykryciu zmiany budujemy nowa pule,
+    podmieniamy global (routery i tak czytaja global przy kazdym zapytaniu)
+    i zamykamy stara pule."""
+    global db_pool
+    last = db_creds()
+    while True:
+        await asyncio.sleep(30)
+        try:
+            current = db_creds()
+            if current != last:
+                old_pool = db_pool
+                db_pool = await create_db_pool(*current)
+                last = current
+                if old_pool:
+                    await old_pool.close()
+                print("db_pool: przelaczono na nowe credsy z Vault")
+        except Exception as exc:  # rotacja moze byc chwilowo niedostepna - trzymamy stara pule
+            print("watch_db_creds error:", exc)
 redis_pool = None
 kafka_producer = None
 
@@ -51,9 +99,11 @@ class BookingResponse(BaseModel):
 @app.on_event("startup")
 async def startup():
     global db_pool, redis_pool, kafka_producer
-    db_pool = await asyncpg.create_pool(host=DB_HOST, port=DB_PORT, database=DB_NAME, user=DB_USER, password=DB_PASS, min_size=5, max_size=20)
+    user, password = db_creds()
+    db_pool = await create_db_pool(user, password)
     redis_pool = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}", decode_responses=True)
     kafka_producer = KafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP, value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+    asyncio.create_task(watch_db_creds())
     await init_db()
 
 @app.on_event("shutdown")

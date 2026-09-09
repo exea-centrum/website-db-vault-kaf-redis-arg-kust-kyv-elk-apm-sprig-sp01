@@ -14,12 +14,21 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      volumes:
+        - { name: db-creds, secret: { secretName: message-processor-db-creds } }
       containers:
         - name: message-processor
           image: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer:latest
           envFrom:
             - configMapRef: { name: fastapi-config }
             - secretRef: { name: davtro-secrets }
+          env:
+            # Dynamiczne credsy DB z Vaulta (database/creds/davtro-app-rw, rotowane co 30m);
+            # db.py przeladowuje silnik SQLAlchemy po wykryciu zmiany plikow.
+            - { name: DB_USER_FILE, value: /etc/db-creds/username }
+            - { name: DB_PASSWORD_FILE, value: /etc/db-creds/password }
+          volumeMounts:
+            - { name: db-creds, mountPath: /etc/db-creds, readOnly: true }
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 300m, memory: 256Mi }

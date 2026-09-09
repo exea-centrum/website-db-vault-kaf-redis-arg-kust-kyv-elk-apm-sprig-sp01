@@ -17,6 +17,8 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      volumes:
+        - { name: db-creds, secret: { secretName: fastapi-db-creds } }
       containers:
         - name: fastapi
           image: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01:latest
@@ -24,6 +26,14 @@ spec:
           envFrom:
             - configMapRef: { name: fastapi-config }
             - secretRef: { name: davtro-secrets }
+          env:
+            # Dynamiczne credsy DB z Vaulta (database/creds/davtro-app-rw, rotowane co 30m).
+            # Env nadpisuje wartosci z envFrom; pliki z sekretu ESO odswieza kubelet,
+            # aplikacja przeladowuje pule polaczen przy wykryciu zmiany (main.py watch_db_creds).
+            - { name: DB_USER_FILE, value: /etc/db-creds/username }
+            - { name: DB_PASSWORD_FILE, value: /etc/db-creds/password }
+          volumeMounts:
+            - { name: db-creds, mountPath: /etc/db-creds, readOnly: true }
           readinessProbe:
             httpGet: { path: /api/health, port: 8080 }
             initialDelaySeconds: 5
