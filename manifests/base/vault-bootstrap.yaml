@@ -1,0 +1,174 @@
+# KROK 3.5: pelna automatyzacja bootstrapu Vaulta - wymog "usun projekt + wrzuc
+# Application do ArgoCD = wszystko wstaje samo". Job (PostSync, jak kafka-topic-job)
+# jest idempotentny i po KAZDYM syncu zapewnia:
+#   1. brak inicjalizacji -> vault operator init (1 key share); unseal_key + root_token
+#      ladowa na PVC /vault/data (plik bootstrap-keys, 600). Trade-off homelab: klucz
+#      unseal obok danych - w produkcji zastap auto-unsealem (cloud KMS / transit).
+#   2. sealed -> unseal kluczem z PVC
+#   3. audit -> stdout (Loki), KV davtro/db (GENERUJE DB_PASSWORD jesli brak - Postgres
+#      initdb wezmie te sama wartosc przez ESO) i davtro/smtp
+#   4. auth kubernetes (TokenReview wymaga ClusterRoleBinding system:auth-delegator nizej)
+#      + policy/role davtro-apps dla ESO
+#   5. database engine + rola davtro-app-rw (retry az Postgres wstanie; SQL w ConfigMap
+#      nizej; davtro jest superuser w obrazie postgres)
+#   6. policy/rola davtro-snapshot dla CronJoba backupow (logowanie po SA, zero tokenow)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-bootstrap-sql
+  namespace: davtro02
+data:
+  creation.sql: |
+    CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}' NOINHERIT;
+    GRANT USAGE, CREATE ON SCHEMA public TO "{{name}}";
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "{{name}}";
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "{{name}}";
+    GRANT "{{name}}" TO davtro WITH ADMIN OPTION;
+  revocation.sql: |
+    REASSIGN OWNED BY "{{name}}" TO davtro;
+    DROP OWNED BY "{{name}}";
+    DROP ROLE IF EXISTS "{{name}}";
+  davtro-apps.hcl: |
+    path "davtro/data/*" { capabilities = ["read"] }
+    path "database/creds/davtro-app-rw" { capabilities = ["read"] }
+  davtro-snapshot.hcl: |
+    path "sys/raft/snapshot" { capabilities = ["sudo", "read"] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: davtro02-vault-tokenreview
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: davtro-sa
+    namespace: davtro02
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-bootstrap
+  namespace: davtro02
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels: { app: vault-bootstrap }
+    spec:
+      serviceAccountName: davtro-sa
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: bootstrap
+          image: hashicorp/vault:1.17
+          env:
+            - { name: VAULT_ADDR, value: "http://vault.davtro02.svc.cluster.local:8200" }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              KEYS=/vault/data/bootstrap-keys
+
+              echo "[bootstrap] czekam na API Vaulta..."
+              until wget -q -O /dev/null "http://vault:8200/v1/sys/health?sealedcode=200&standbyok=true&uninitcode=200"; do sleep 3; done
+
+              STATUS=$(vault status -format=json 2>/dev/null || echo '{}')
+              INIT=$(echo "$STATUS" | sed -n 's/.*"initialized": *\([a-z]*\).*/\1/p')
+              SEALED=$(echo "$STATUS" | sed -n 's/.*"sealed": *\([a-z]*\).*/\1/p')
+
+              if [ "$INIT" != "true" ]; then
+                echo "[bootstrap] brak inicjalizacji -> vault operator init"
+                INIT_JSON=$(vault operator init -key-shares=1 -key-threshold=1 -format=json)
+                UKEY=$(echo "$INIT_JSON" | sed -n 's/.*"unseal_keys_b64":\[\"\([^\"]*\)\".*/\1/p')
+                RTOKEN=$(echo "$INIT_JSON" | sed -n 's/.*"root_token":"\([^\"]*\)".*/\1/p')
+                printf '%s\n%s\n' "$UKEY" "$RTOKEN" > "$KEYS"
+                chmod 600 "$KEYS"
+              elif [ ! -f "$KEYS" ]; then
+                echo "[bootstrap] Vault juz zainicjalizowany, ale brak pliku $KEYS (klaster sprzed automatyzacji)."
+                echo "[bootstrap] Jednorazowo: zapisz na podzie vault-0 plik /vault/data/bootstrap-keys"
+                echo "[bootstrap] (linia 1 = unseal_key, linia 2 = root_token, chmod 600), potem re-sync ArgoCD."
+                exit 1
+              fi
+
+              if [ "$SEALED" = "true" ]; then
+                echo "[bootstrap] unseal"
+                vault operator unseal "$(head -n1 "$KEYS")"
+              fi
+              export VAULT_TOKEN="$(tail -n1 "$KEYS")"
+              until [ "$(vault status -format=json | sed -n 's/.*"sealed": *\([a-z]*\).*/\1/p')" = "false" ]; do sleep 3; done
+
+              vault audit list 2>/dev/null | grep -q 'file/' || vault audit enable file file_path=stdout
+              echo "[bootstrap] audit -> stdout (Loki)"
+
+              vault secrets list 2>/dev/null | grep -q 'davtro/' || vault secrets enable -path=davtro kv-v2
+              if ! vault kv get davtro/db >/dev/null 2>&1; then
+                PGPASS="$(head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)"
+                [ -n "$PGPASS" ] || PGPASS="Davtro$(date +%s)x1"
+                vault kv put davtro/db DB_USER=davtro DB_PASSWORD="$PGPASS"
+                echo "[bootstrap] wygenerowano DB_PASSWORD (KV davtro/db) - Postgres initdb uzyje go przez ESO"
+              fi
+              vault kv get davtro/smtp >/dev/null 2>&1 || vault kv put davtro/smtp SMTP_USER='' SMTP_PASSWORD=''
+
+              vault auth list 2>/dev/null | grep -q 'kubernetes/' || vault auth enable kubernetes
+              vault write auth/kubernetes/config \
+                kubernetes_host="https://kubernetes.default.svc" \
+                kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+                disable_iss_validation=true
+              vault policy write davtro-apps /sql/davtro-apps.hcl
+              vault write auth/kubernetes/role/davtro-apps \
+                bound_service_account_names=davtro-sa \
+                bound_service_account_namespaces=davtro02 \
+                policies=davtro-apps ttl=1h
+
+              DB_PASSWORD=$(vault kv get -field=DB_PASSWORD davtro/db)
+              vault secrets list 2>/dev/null | grep -q 'database/' || vault secrets enable database
+              i=0
+              until vault write database/config/davtro-postgresql \
+                  plugin_name=postgresql-database-plugin \
+                  allowed_roles=davtro-app-rw \
+                  connection_url="postgresql://{{username}}:{{password}}@postgres-clusterip.davtro02.svc.cluster.local:5432/davtro_rentals?sslmode=disable" \
+                  username=davtro password="$DB_PASSWORD" >/dev/null; do
+                i=$((i + 1))
+                [ "$i" -ge 30 ] && { echo "[bootstrap] Postgres nieosiagalny - abort"; exit 1; }
+                echo "[bootstrap] Postgres jeszcze nie gotowy ($i/30) - retry za 10s"
+                sleep 10
+              done
+              echo "[bootstrap] polaczenie database/config OK"
+
+              vault write database/roles/davtro-app-rw \
+                db_name=davtro-postgresql \
+                creation_statements=@/sql/creation.sql \
+                revocation_statements=@/sql/revocation.sql \
+                default_ttl=1h max_ttl=24h
+
+              vault policy write davtro-snapshot /sql/davtro-snapshot.hcl
+              vault write auth/kubernetes/role/davtro-snapshot \
+                bound_service_account_names=davtro-sa \
+                bound_service_account_namespaces=davtro02 \
+                policies=davtro-snapshot ttl=1h
+
+              echo "[bootstrap] DONE - Vault w pelni skonfigurowany"
+          volumeMounts:
+            - { name: vault-data, mountPath: /vault/data }
+            - { name: sql, mountPath: /sql, readOnly: true }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+      volumes:
+        - name: vault-data
+          persistentVolumeClaim:
+            claimName: vault-data-vault-0
+        - name: sql
+          configMap:
+            name: vault-bootstrap-sql

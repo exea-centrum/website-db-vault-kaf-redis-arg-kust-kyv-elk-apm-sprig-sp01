@@ -19,6 +19,7 @@ resources:
 - redis.yaml
 - vault.yaml
 - vault-snapshot.yaml
+- vault-bootstrap.yaml
 - kafka.yaml
 - message-processor.yaml
 - spring-app.yaml

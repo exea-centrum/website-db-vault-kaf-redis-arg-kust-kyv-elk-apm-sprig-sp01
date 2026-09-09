@@ -1,7 +1,6 @@
 # CronJob: nocny snapshot rafta Vaulta -> PVC vault-backup (retencja 14 dni).
-# Wymaga sekretu z tokenem Vault (na start root_token, docelowo policy "snapshot"):
-#   kubectl -n davtro02 create secret generic vault-snapshot \
-#     --from-literal=VAULT_TOKEN=<root_token>
+# Token: logowanie do Vaulta przez kubernetes auth (rola davtro-snapshot, policy
+# sys/raft/snapshot z sudo) - konfiguruje to Job vault-bootstrap (vault-bootstrap.yaml).
 # Ręczne odtworzenie z backupu:
 #   vault operator raft snapshot restore /backup/snapshot-XXXX.snap
 apiVersion: v1
@@ -37,15 +36,12 @@ spec:
               env:
                 - name: VAULT_ADDR
                   value: http://vault.davtro02.svc.cluster.local:8200
-                - name: VAULT_TOKEN
-                  valueFrom:
-                    secretKeyRef:
-                      name: vault-snapshot
-                      key: VAULT_TOKEN
               command: ["/bin/sh", "-c"]
               args:
                 - |
                   set -e
+                  SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                  export VAULT_TOKEN="$(vault write -field=token auth/kubernetes/login jwt="$SA_TOKEN" role=davtro-snapshot)"
                   STAMP=$(date +%Y%m%d-%H%M%S)
                   vault operator raft snapshot save "/backup/snapshot-${STAMP}.snap"
                   find /backup -name 'snapshot-*.snap' -mtime +14 -delete
