@@ -1,0 +1,62 @@
+# CronJob: nocny snapshot rafta Vaulta -> PVC vault-backup (retencja 14 dni).
+# Wymaga sekretu z tokenem Vault (na start root_token, docelowo policy "snapshot"):
+#   kubectl -n davtro02 create secret generic vault-snapshot \
+#     --from-literal=VAULT_TOKEN=<root_token>
+# Ręczne odtworzenie z backupu:
+#   vault operator raft snapshot restore /backup/snapshot-XXXX.snap
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vault-backup
+  namespace: davtro02
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-snapshot
+  namespace: davtro02
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: { app: vault-snapshot }
+        spec:
+          serviceAccountName: davtro-sa
+          restartPolicy: Never
+          containers:
+            - name: snapshot
+              image: hashicorp/vault:1.17
+              env:
+                - name: VAULT_ADDR
+                  value: http://vault.davtro02.svc.cluster.local:8200
+                - name: VAULT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: vault-snapshot
+                      key: VAULT_TOKEN
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  STAMP=$(date +%Y%m%d-%H%M%S)
+                  vault operator raft snapshot save "/backup/snapshot-${STAMP}.snap"
+                  find /backup -name 'snapshot-*.snap' -mtime +14 -delete
+                  echo "OK: snapshot-${STAMP}.snap"
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { cpu: 200m, memory: 128Mi }
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: vault-backup

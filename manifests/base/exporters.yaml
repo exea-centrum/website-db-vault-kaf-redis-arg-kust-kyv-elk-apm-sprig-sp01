@@ -17,8 +17,15 @@ spec:
         - name: postgres-exporter
           image: prometheuscommunity/postgres-exporter:v0.15.0
           env:
-            - name: DATA_SOURCE_NAME
-              value: "postgresql://davtro:changeme@postgres-db:5432/davtro_rentals?sslmode=disable"
+            # Credsy z sekretu generowanego przez ESO (external-secrets.yaml) - zero
+            # hasel w Git. HOST poprawiony: postgres-clusterip (Service); wczesniej
+            # wskazywal nieistniejacy 'postgres-db' i exporter nie mial polaczenia.
+            - name: DATA_SOURCE_URI
+              value: "postgres://postgres-clusterip:5432/davtro_rentals?sslmode=disable"
+            - name: DATA_SOURCE_USER
+              valueFrom: { secretKeyRef: { name: davtro-secrets, key: DB_USER } }
+            - name: DATA_SOURCE_PASS
+              valueFrom: { secretKeyRef: { name: davtro-secrets, key: DB_PASSWORD } }
           ports: [{ containerPort: 9187 }]
           resources:
             requests: { cpu: 25m, memory: 32Mi }
