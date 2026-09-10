@@ -29,9 +29,11 @@ spec:
       app: vault
   ingress:
     - from:
-        - podSelector: {}
         # Caly ns external-secrets (pody ESO) -> naprawia
         # 'context deadline exceeded' w SecretStore vault-backend.
+        # UWAGA: sam namespaceSelector (bez podSelector) - kombinacja
+        # podSelector+namespaceSelector w JEDNYM elemencie from to AND
+        # (ten sam pod musialby byc w obu ns), wiec musi byc osobno.
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: external-secrets

@@ -25,5 +25,4 @@ spec:
       # co sie da, a reszta (vid. storageClassName w vault-snapshot.yaml)
       # jest utrzymywana zgodnie w manifestach.
       - CreateNamespace=true
-      - Replace=true
 
