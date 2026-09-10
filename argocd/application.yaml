@@ -17,5 +17,11 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
+      # UWAGA: celowo BEZ Replace=true. Tryb Replace podmienia cala definicje
+      # obiektu, a Kubernetes zabrania updatu immutable fields istniejacych
+      # zasobow (bound PersistentVolumeClaims, spec StatefulSetow poza
+      # dozwolonymi polami) -> kazdy taki dryf zawalal CALY sync aplikacji
+      # (SyncError, retry x5). Bez Replace ArgoCD aktualizuje w miejscu to,
+      # co sie da, a reszta (vid. storageClassName w vault-snapshot.yaml)
+      # jest utrzymywana zgodnie w manifestach.
       - CreateNamespace=true
-      - Replace=true

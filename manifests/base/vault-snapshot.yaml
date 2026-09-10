@@ -10,6 +10,11 @@ metadata:
   namespace: davtro02
 spec:
   accessModes: ["ReadWriteOnce"]
+  # storageClassName MUSI byc podane jawnie: microk8s dopisuje je przy
+  # tworzeniu wolumenu (bound PVC), a ArgoCD probowalby je zresetowac do null
+  # przy kazdym selfHeal -> Kubernetes tego zabrania (spec jest immutable dla
+  # bound claims) i CALY sync aplikacji padal (SyncError).
+  storageClassName: microk8s-hostpath
   resources: { requests: { storage: 2Gi } }
 ---
 apiVersion: batch/v1
