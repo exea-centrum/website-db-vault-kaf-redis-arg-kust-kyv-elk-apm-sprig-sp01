@@ -332,6 +332,7 @@ postgres / fastapi / message-processor / spring-app / pgadmin / postgres-exporte
 
 `push do main -> CI buduje 5 obrazów GHCR (api, consumer, frontend, spark, spring) i podbija tagi w Kustomize -> ArgoCD (Aplikacja davtro-website, auto-sync prune+selfHeal, CreateNamespace) buduje overlay production i odtwarza cały powyższy graf w namespace davtro02`.
 
+```text
                     +---------------- GitHub HEAD ------------------+
                     | manifests/overlays/production -> ../../base   |
                     +---------------+--------------------------------+
@@ -374,3 +375,4 @@ postgres / fastapi / message-processor / spring-app / pgadmin / postgres-exporte
                     | HPA fastapi 2-8 CPU70% | PDB minAvailable:1 |
                     | NetworkPolicy deny+allow | Kyverno Enforce |
                     +--------------------------------------------+
+```
