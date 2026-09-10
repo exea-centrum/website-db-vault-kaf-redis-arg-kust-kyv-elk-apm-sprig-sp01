@@ -145,7 +145,7 @@ spec:
                   # nie lapal klucza. Sed: linia z kluczem -> nastepna linia -> zostaja
                   # tylko znaki base64 (A-Za-z0-9+/=).
                   UKEY=$(printf '%s\n' "$INIT_JSON" | sed -n '/"unseal_keys_b64"/{n;s/[^A-Za-z0-9+\/=]//g;p;q}')
-                  RTOKEN=$(echo "$INIT_JSON" | grep -o '"root_token": *"[^"]*"' | tr -d '" ')
+                  RTOKEN=$(echo "$INIT_JSON" | sed -n 's/.*"root_token": *"\([^"]*\)".*/\1/p')
                   if [ -z "$UKEY" ] || [ -z "$RTOKEN" ]; then
                     log "nie udalo sie wyciagnac kluczy z init - retry"
                     return 1
