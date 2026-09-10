@@ -332,3 +332,45 @@ postgres / fastapi / message-processor / spring-app / pgadmin / postgres-exporte
 
 `push do main -> CI buduje 5 obrazów GHCR (api, consumer, frontend, spark, spring) i podbija tagi w Kustomize -> ArgoCD (Aplikacja davtro-website, auto-sync prune+selfHeal, CreateNamespace) buduje overlay production i odtwarza cały powyższy graf w namespace davtro02`.
 
+                    +---------------- GitHub HEAD ------------------+
+                    | manifests/overlays/production -> ../../base   |
+                    +---------------+--------------------------------+
+                                    | pull + kustomize build
+                          +---------v-----------+
+                          | ArgoCD davtro-website (ns argocd) |
+                          +---------+-----------+
+                                    | apply -> ns davtro02
+        +---------------------------+-----------------------------+
+        |                           |                             |
++-------v-------+        +----------v----------+       +----------v----------+
+|   VAULT LAYER |        |     DATA LAYER      |       |     APP LAYER       |
+| vault-0 :8200 |<-------+ postgres-db :5432   |<------+ fastapi-web-app :8080|
+| bootstrap     |  dynamic| redis :6379         |  SQL  | message-processor  |
+| snapshot 03:00|  creds  | kafka-kraft :9092   |  KV   | spring-app :8081   |
++-------+-------+        +----------+----------+       | frontend nginx :8080 |
+        ^                           ^                  | spark master/worker |
+        | K8s auth                    |                  +----------+----------+
+        | jwt davtro-sa               |                             | Kafka topics
++-------v---------------------------v-----------------------------v----------+
+| SECRETS LAYER: SecretStore vault-backend/vault-dynamic + ExternalSecret     |
+| davtro-secrets + VaultDynamicSecret db-creds-davtro-app-rw ->               |
+| fastapi-db-creds / message-processor-db-creds                               |
++--------------------------------+--------------------------------------------+
+                                 |
+        +------------------------v-------------------------------------------+
+        | OBSERVABILITY: prometheus:9090 <- postgres/kafka/node-exporter      |
+        | grafana:3000 (Prometheus+Loki+Tempo) | loki:3100 <- promtail (DS)   |
+        | tempo:3200 | kafka-ui:8080 | pgadmin:80                             |
+        +------------------------------------------------+-------------------+
+                                         |
+                          +--------------v---------------+
+                          | EDGE: Ingress davtro.local   |
+                          | /api->fastapi /->frontend    |
+                          | /grafana /kafka-ui /pgadmin  |
+                          | spark.davtro.local->spark-ui |
+                          +------------+-----------------+
+                                       |
+                    +--------+---------+---------+--------+
+                    | HPA fastapi 2-8 CPU70% | PDB minAvailable:1 |
+                    | NetworkPolicy deny+allow | Kyverno Enforce |
+                    +--------------------------------------------+
