@@ -144,3 +144,191 @@ kubectl -n davtro02 logs deploy/fastapi-web-app | grep -i "przelaczono\|creds"
 ```
 
 Roadmapa: **Krok 4** = PKI (cert-manager + Vault issuer dla ingress TLS) + GitHub OIDC dla CI; opcjonalnie Transit (szyfrowanie PII w PostgreSQL) i migracja Springa na Spring Cloud Vault.
+
+---
+
+# Platforma Davtro — co to za strona i po co każdy komponent (wersja bez sekretów)
+
+> Ta sekcja nie zawiera żadnych haseł, tokenów ani certyfikatów. Opisuje wyłącznie przeznaczenie elementów systemu.
+
+## 1. Jaka to strona i do czego służy
+
+**Davtro Apartments** to platforma wynajmu krótkoterminowego (apartamenty / pokoje na doby):
+
+- gość wybiera apartament i termin w kalendarzu na stronie,
+- wysyła rezerwację przez API,
+- system zapisuje rezerwację, wysyła e-mail z potwierdzeniem i fakturą proforma,
+- zgody marketingowe gościa zasilają analitykę marketingową,
+- panel administracyjno-raportowy służy obsłudze obiektu.
+
+Wejście od internetu: host `davtro.local` (Ingress `davtro-ingress`):
+
+| Ścieżka | Dokąd prowadzi | Do czego służy |
+|---|---|---|
+| `/` | `frontend-svc:80` (Nginx) | strona dla gościa: oferta, kalendarz, formularz rezerwacji |
+| `/api` | `fastapi-web-app-svc:80` | REST API rezerwacji (tworzenie / odczyt / status) |
+| `/grafana` | `grafana:3000` | podgląd metryk, logów i tracingu |
+| `/kafka-ui` | `kafka-ui:80` | podgląd topiców i wiadomości Kafka (diagnostyka) |
+| `/pgadmin` | `pgadmin:80` | przegląd bazy przez przeglądarkę (administracja) |
+| `spark.davtro.local /` | `spark-master-svc:8082` | podgląd jobów Spark (analityka) |
+
+## 2. Mapa komponentów — co do czego uderza i po co istnieje
+
+```text
+gość (przeglądarka)
+  |
+  v
+Ingress davtro.local
+  |-- / ---------> frontend (Nginx, statyczna strona + kalendarz)
+  |-- /api ------> fastapi-web-app (API rezerwacji)
+  |                   |-- zapis/odczyt ---> postgres (baza rezerwacji)
+  |                   |-- cache/sesje ----> redis (szybka pamięć)
+  |                   |-- event rezerwacji -> kafka-kraft (kolejka zdarzeń)
+  |-- /grafana ---> grafana (metryki + logi + trace w jednym miejscu)
+  |-- /kafka-ui --> kafka-ui (podgląd kolejek)
+  |-- /pgadmin ---> pgadmin (podgląd bazy)
+```
+
+```text
+kafka-kraft (bookings-created, email-invoices, marketing-actions)
+  |
+  +--> message-processor (konsument: wysyła e-maile, aktualizuje status w DB)
+  +--> spring-app (panel raportowy Java na tych samych danych)
+  +--> spark-master + spark-worker x2 (analityka marketingowa w tle)
+
+postgres-exporter / kafka-exporter / node-exporter
+  |
+  v
+prometheus (metryki) ---> grafana (wykresy)
+
+promtail (zbiera logi z każdego noda)
+  |
+  v
+loki (magazyn logów) ---> grafana (przeszukiwanie logów)
+
+aplikacje (OpenTelemetry)
+  |
+  v
+tempo (magazyn trace) ---> grafana (podgląd ścieżki requestu)
+
+vault + vault-bootstrap (sejf na sekrety, auto-konfiguracja po starcie)
+  |
+  v
+external-secrets (SecretStore + ExternalSecret + VaultDynamicSecret)
+  |
+  v
+Sekrety Kubernetes (davtro-secrets, fastapi-db-creds, message-processor-db-creds)
+  |
+  v
+postgres / fastapi / message-processor / spring-app / pgadmin / postgres-exporter
+```
+
+## 3. Warstwa aplikacji — opis każdego elementu
+
+### frontend (Nginx)
+- **Co to:** statyczna strona dla gościa (oferta, zdjęcia, kalendarz, formularz).
+- **Po co:** szybkie serwowanie treści bez obciążania API.
+- **Z kim gada:** przeglądarka gościa; formularz woła `/api` na backendzie.
+
+### fastapi-web-app — API (Python FastAPI, 3 repliki na produkcji)
+- **Co to:** główne API rezerwacji (`POST /api/...`, `GET /api/health` do sond).
+- **Po co:** przyjmuje rezerwacje, waliduje terminy, zapisuje do bazy, odkłada event na kolejkę.
+- **Z kim gada:** `postgres-clusterip:5432` (zapis rezerwacji), `redis:6379` (cache dostępności / idempotencja), `kafka-kraft:9092` (publikacja eventu). Konfiguracja z `ConfigMap fastapi-config`, sekrety z `davtro-secrets` + dynamiczne credsy z `/etc/db-creds`.
+- **Odporność:** `HPA 2-8 (CPU 70%)`, `PDB minAvailable: 1`, sondy `readiness/liveness /api/health`.
+
+### message-processor (Python consumer)
+- **Co to:** pracownik w tle, konsument Kafki.
+- **Po co:** odbiera event rezerwacji, wysyła e-mail (potwierdzenie + faktura proforma) i przestawia status rezerwacji w bazie; konsumuje też zgody marketingowe. Bez niego rezerwacja zostałaby w statusie "oczekująca".
+- **Z kim gada:** `kafka-kraft:9092` (konsumpcja), `postgres-clusterip:5432` (update statusu), SMTP (wysyłka).
+
+### spring-app-deployment (Java Spring Boot `:8081`)
+- **Co to:** panel raportowo-administracyjny na tych samych danych co FastAPI.
+- **Po co:** zestawienia, raporty, obsługa obiektu w technologii Java.
+- **Z kim gada:** `postgres-clusterip`, `kafka-kraft`.
+
+### spark-master + spark-worker x2 (Apache Spark 3.5)
+- **Co to:** silnik obliczeń batch (master `:7077`, UI `:8082` + 2 workery).
+- **Po co:** analityka marketingowa (`spark-jobs/marketing_analytics.py`), np. agregacje zgód / kampanii. Odciąża bazę transakcyjną od ciężkich zapytań.
+- **Z kim gada:** workerzy łączą się do `spark://spark-master-svc:7077`.
+
+## 4. Warstwa danych — po co Postgres, Redis i Kafka
+
+### postgres-db (PostgreSQL 16, StatefulSet 1x + headless Service `postgres-clusterip:5432`)
+- **Co to:** jedyne trwałe źródło prawdy (baza `davtro_rentals`).
+- **Po co:** rezerwacje, statusy, użytkownicy, zgody marketingowe.
+- **Trwałość:** wolumen `pgdata 5Gi` (szablon PVC w StatefulSecie).
+- **Dostęp:** tylko wewnątrz klastra; graficznie przez `pgadmin`, metryki przez `postgres-exporter`.
+
+### redis (Redis 7, Deployment 1x, `redis:6379`)
+- **Co to:** pamięć podręczna klucz-wartość (in-memory).
+- **Po co:** cache dostępności terminów, sesje, bufor eventów, odciążenie Postgresa od powtarzalnych odczytów. Dane ulotne — po restarcie odtwarzane z bazy.
+- **Z kim gada:** wyłącznie `fastapi-web-app` (zmienne `REDIS_HOST/REDIS_PORT` z ConfigMap).
+
+### kafka-kraft (Apache Kafka 3.7, KRaft bez Zookepera, StatefulSet 1x)
+- **Co to:** rozproszony dziennik zdarzeń (kolejka): broker `:9092` + kontroler `:9093`, wolumen `kafka-data 5Gi`.
+- **Po co:** rozprzęga API od wysyłki maili i analityki. API odpowiada gościowi od razu, a ciężka praca (mail, faktura, agregacje) dzieje się asynchronicznie. Topici (po 3 partycje): `bookings-created` (nowe rezerwacje), `email-invoices` (maile/faktury), `marketing-actions` (zgody/akcje marketingowe).
+- **Kto tworzy topici:** `Job kafka-topic-job` (ArgoCD `PostSync` hook, samousuwalny po 300 s).
+- **Kto produkuje / konsumuje:** producent `fastapi-web-app`; konsumenci `message-processor`, `spring-app`, joby Spark.
+- **Podgląd:** `kafka-ui`.
+
+## 5. Bezpieczeństwo i sekrety — po co Vault i External Secrets (bez wartości)
+
+### vault (HashiCorp Vault 1.17, StatefulSet 1x, `:8200/:8201`, storage Raft na PVC)
+- **Co to:** sejf na sekrety z szyfrowaniem danych w spoczynku.
+- **Po co:** żadne hasło nie leży w Git. Aplikacje dostają je dopiero w klastrze.
+- **Tryb:** Raft na wolumenie `vault-data 2Gi`, UI włączone, telemetria dla Prometheusa.
+
+### vault-bootstrap (Deployment z pętlą self-heal co 60 s)
+- **Co to:** automatyczny konfigurator sejfu po starcie od zera (cold start).
+- **Po co:** odtwarza cały łańcuch bez klikania: init/unseal, audit do stdout, wpisy KV, auth Kubernetes, polityki i role, silnik bazy danych + wyrównanie hasła z żywym Postgresem. Kończy logiem `DONE - Vault skonfigurowany`.
+
+### vault-snapshot (CronJob `0 3 * * *` + PVC `vault-backup 2Gi`)
+- **Co to:** nocna kopia Rafta (`snapshot-STAMP.snap`, retencja 14 dni).
+- **Po co:** odtworzenie sejfu po awarii (`raft snapshot restore`).
+- **Uwierzytelnianie:** tokenem krótkoterminowym z logowania JWT ServiceAccount (rola snapshotowa), bez stałych sekretów w YAML.
+
+### SecretStore `vault-backend` / `vault-dynamic` + ExternalSecret + VaultDynamicSecret
+- **Co to:** most `Vault -> Kubernetes Secrets` (operator ESO w osobnym namespace `external-secrets`).
+- **Po co:** zamienia wpisy sejfu na natywne Sekrety K8s, które Deploymenty montują jako env/pliki:
+  - `davtro-secrets` (statyczne: login/hasło DB + SMTP),
+  - `fastapi-db-creds` / `message-processor-db-creds` (dynamiczne, rotowane konta DB z silnika `database/creds/...`).
+- **Rotacja:** statyczne co 1 h, dynamiczne co 30 min; aplikacje Python przeładowują pule połączeń w locie.
+
+## 6. Obserwowalność — po co Prometheus, Grafana, Loki, Promtail i Tempo
+
+### prometheus (`prometheus:9090`)
+- **Co to:** baza metryk liczbowych (scrape co 15 s).
+- **Po co:** odpowiada na pytania "ile requestów?", "jaki czas odpowiedzi?", "czy baza/Kafka żyją?".
+- **Skąd zbiera:** `fastapi-web-app-svc:80`, `postgres-exporter:9187`, `kafka-exporter:9308`, `node-exporter:9100`.
+
+### postgres-exporter / kafka-exporter / node-exporter
+- **Co to:** tłumacze stanu na metryki dla Prometheusa.
+- **Po co:** osobno widać kondycję bazy, kolejek i samego węzła (CPU/RAM/dysk/sieć).
+
+### grafana (`grafana:3000`, gotowy dashboard `Davtro Platform Overview`)
+- **Co to:** jedno okno na metryki + logi + trace (źródła: Prometheus, Loki, Tempo).
+- **Po co:** diagnoza "co się stało?" bez grzebania po podach. Wystawiona pod `/grafana`.
+
+### loki (`loki:3100`) + promtail (DaemonSet na każdym nodzie)
+- **Co to:** magazyn logów (Loki) + zbieracz logów (Promtail czyta `/var/log/containers/*.log` i wysyła do Loki).
+- **Po co:** przeszukiwanie logów wszystkich podów (API, konsument, Vault audit ze stdout) z jednego miejsca w Grafanie.
+
+### tempo (`tempo:3200`)
+- **Co to:** magazyn trace rozproszonych (OpenTelemetry, protokoły OTLP http+grpc).
+- **Po co:** pokazuje ścieżkę jednego requestu przez system (frontend -> API -> DB/Kafka -> konsument), więc widać, który krok spowalnia rezerwację.
+
+### kafka-ui (`:8080`, ścieżka `/kafka-ui`) i pgadmin (`:80`, ścieżka `/pgadmin`)
+- **Po co:** szybki podgląd "czy eventy płyną?" (Kafka) i "co leży w bazie?" (Postgres) bez wchodzenia na pody.
+
+## 7. Wejście, skalowanie, odporność i polityki
+
+- **Ingress:** `davtro-ingress` (klasa `public`, host `davtro.local`) + `spark-ingress` (`spark.davtro.local`). Bez zainstalowanego kontrolera Ingress obiekty istnieją, ale nie dostają adresu — stan oczekiwany w tym środowisku (adnotacja `ignore-healthcheck`).
+- **Skalowanie:** `HPA fastapi-web-app-hpa` (2-8 replik przy CPU 70%), na produkcji bazowo 3 repliki API, 2 repliki frontendu i 2 workery Spark.
+- **Dostępność:** `PDB fastapi-web-app-pdb` (min. 1 dostępny przy pracach na węzłach).
+- **Sieć:** `NetworkPolicy default-deny-ingress` (domyślnie zamknij) + jawne otwarcia: ruch wewnątrz namespacu, ESO (`external-secrets`) do Vaulta (`:8200/:8201`), wejście do API i frontendu.
+- **Ład:** `ClusterPolicy davtro-baseline-policy` (Kyverno, `Enforce`): obrazy z zaufanych rejestrów, wymagane `requests/limits`, zakaz kontenerów uprzywilejowanych. `ServiceMonitor`y są przygotowane, ale nieaktywne do czasu instalacji Prometheus Operatora.
+
+## 8. GitOps w jednym zdaniu
+
+`push do main -> CI buduje 5 obrazów GHCR (api, consumer, frontend, spark, spring) i podbija tagi w Kustomize -> ArgoCD (Aplikacja davtro-website, auto-sync prune+selfHeal, CreateNamespace) buduje overlay production i odtwarza cały powyższy graf w namespace davtro02`.
+
