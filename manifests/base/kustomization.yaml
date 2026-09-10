@@ -39,16 +39,16 @@ resources:
 images:
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-  newTag: 2e8172d012da5729b293cf43237b836d7defd9ff
+  newTag: cffc3e54d732f9dd0c4fd0c988c186d773d531a4
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
-  newTag: 2e8172d012da5729b293cf43237b836d7defd9ff
+  newTag: cffc3e54d732f9dd0c4fd0c988c186d773d531a4
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
-  newTag: 2e8172d012da5729b293cf43237b836d7defd9ff
+  newTag: cffc3e54d732f9dd0c4fd0c988c186d773d531a4
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
-  newTag: 2e8172d012da5729b293cf43237b836d7defd9ff
+  newTag: cffc3e54d732f9dd0c4fd0c988c186d773d531a4
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
-  newTag: 2e8172d012da5729b293cf43237b836d7defd9ff
+  newTag: cffc3e54d732f9dd0c4fd0c988c186d773d531a4
