@@ -21,10 +21,44 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: allow-eso-to-vault
+  namespace: davtro02
+spec:
+  podSelector:
+    matchLabels:
+      app: vault
+  ingress:
+    - from:
+        - podSelector: {}
+        # Caly ns external-secrets (pody ESO) -> naprawia
+        # 'context deadline exceeded' w SecretStore vault-backend.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: external-secrets
+      ports:
+        - { protocol: TCP, port: 8200 }
+        - { protocol: TCP, port: 8201 }
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: allow-ingress-to-web
   namespace: davtro02
 spec:
   podSelector: { matchLabels: { app: fastapi-web-app } }
+  ingress:
+    - from: []
+      ports: [{ protocol: TCP, port: 8080 }]
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-frontend
+  namespace: davtro02
+spec:
+  podSelector: { matchLabels: { app: frontend } }
   ingress:
     - from: []
       ports: [{ protocol: TCP, port: 8080 }]

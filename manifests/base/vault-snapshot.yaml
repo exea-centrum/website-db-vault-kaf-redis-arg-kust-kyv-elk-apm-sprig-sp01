@@ -46,6 +46,14 @@ spec:
           containers:
             - name: snapshot
               image: hashicorp/vault:1.17
+              # Obraz vault domyslnie startuje jako root -> runAsNonRoot z poziomu
+              # poda (wstrzykniete tez przez Kyverno) odrzuca kontener. Jawny
+              # UID 100 (vault) + GID 1000 jak w vault.yaml / vault-bootstrap.
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 100
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
               env:
                 - name: VAULT_ADDR
                   value: http://vault.davtro02.svc.cluster.local:8200
