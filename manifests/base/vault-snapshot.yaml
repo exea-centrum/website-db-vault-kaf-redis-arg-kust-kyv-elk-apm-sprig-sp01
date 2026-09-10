@@ -35,6 +35,14 @@ spec:
         spec:
           serviceAccountName: davtro-sa
           restartPolicy: Never
+          # Webhook wstrzykuje runAsNonRoot:true; obraz jest domyslnie root,
+          # wiec MUSI byc jawny non-root (uid 100 = vault, gid 1000 + fsGroup =
+          # jak w vault.yaml). Bez tego kubelet: CreateContainerConfigError.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 1000
+            fsGroup: 1000
           containers:
             - name: snapshot
               image: hashicorp/vault:1.17

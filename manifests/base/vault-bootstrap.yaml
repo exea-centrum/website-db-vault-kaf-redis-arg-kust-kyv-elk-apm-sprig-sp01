@@ -92,10 +92,22 @@ spec:
       labels: { app: vault-bootstrap }
     spec:
       serviceAccountName: davtro-sa
+      # Webhook mutujacy (Kyverno/PSA) wstrzykuje runAsNonRoot:true do poda,
+      # a obrazy sa domyslnie root - bez jawnego niezerowego runAsUser kubelet
+      # odrzuca kontenery (CreateContainerConfigError / obraz root). Vault i
+      # kubectl dzialaja na UID 100 (vault), fsGroup 1000 jak w vault.yaml.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
       initContainers:
         - name: fetch-kubectl
-          image: bitnami/kubectl:1.30
-          command: ["sh", "-c", "cp /opt/bitnami/kubectl/bin/kubectl /share/kubectl"]
+          # bitnami/kubectl:1.30 NIE istnieje na Docker Hub (Bitnami polecialo na ECR) ->
+          # ImagePullBackOff przez kilkadziesiat godzin. alpine/k8s jest na Docker Hub
+          # i pasuje do serwera microk8s v1.36.
+          image: docker.io/alpine/k8s:1.36.4
+          command: ["sh", "-c", "cp /usr/bin/kubectl /share/kubectl"]
           volumeMounts:
             - { name: tools, mountPath: /share }
           resources:
