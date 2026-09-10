@@ -140,7 +140,11 @@ spec:
                 if [ "$INIT" != "true" ]; then
                   log "brak inicjalizacji -> vault operator init"
                   INIT_JSON=$(vault operator init -key-shares=1 -key-threshold=1 -format=json) || { log "init nieudany - retry"; return 1; }
-                  UKEY=$(echo "$INIT_JSON" | grep -o '"unseal_keys_b64":\[[^]]*\]' | tr -d '"[] ')
+                  # UWAGA: grep(-o) dziala linia-po-linii, a "unseal_keys_b64" jest tablica
+                  # wielolinijkowa (json.MarshalIndent) - wzorzec z "\[[^]]*\]" nigdy
+                  # nie lapal klucza. Sed: linia z kluczem -> nastepna linia -> zostaja
+                  # tylko znaki base64 (A-Za-z0-9+/=).
+                  UKEY=$(printf '%s\n' "$INIT_JSON" | sed -n '/"unseal_keys_b64"/{n;s/[^A-Za-z0-9+\/=]//g;p;q}')
                   RTOKEN=$(echo "$INIT_JSON" | grep -o '"root_token": *"[^"]*"' | tr -d '" ')
                   if [ -z "$UKEY" ] || [ -z "$RTOKEN" ]; then
                     log "nie udalo sie wyciagnac kluczy z init - retry"
