@@ -246,21 +246,17 @@ spec:
                 # --- KROK 5 (PKI): wewnetrzne CA davtro-internal (self-signed, homelab).
                 # W produkcji: root zewnetrzny podpisuje CSR (pki/intermediate/generate
                 # -> set-signed), nie self-sign. Idempotentne: za drugim razem tylko
-                # odswieza tune/role/policy (generate pomijane gdy CA juz istnieje).
+                # odswieza tune/role/policy (root/generate pomijane gdy CA juz istnieje).
                 if ! vault secrets list 2>/dev/null | grep -q '^pki/'; then
                   log "PKI: wlaczam silnik pki (intermediate davtro-internal)"
                   vault secrets enable -path=pki pki >/dev/null
                 fi
                 vault secrets tune -max-lease-ttl=87600h pki >/dev/null 2>&1 || true
                 if ! vault read pki/cert/ca >/dev/null 2>&1; then
-                  log "PKI: generuje intermediate + self-sign (homelab)"
-                  vault write -field=csr pki/intermediate/generate/internal \
-                    common_name="davtro-internal Intermediate Authority" > /tmp/pki.csr
-                  vault write -field=certificate pki/root/sign-self \
-                    csr=@/tmp/pki.csr common_name="davtro-internal Intermediate Authority" \
-                    ttl=87600h > /tmp/pki.crt
-                  vault write pki/intermediate/set-signed certificate=@/tmp/pki.crt >/dev/null
-                  rm -f /tmp/pki.csr /tmp/pki.crt
+                  log "PKI: generuje self-signed root CA (homelab)"
+                  vault write -field=certificate pki/root/generate/internal \
+                    common_name="davtro-internal CA" \
+                    ttl=87600h key_type=rsa key_bits=2048 >/dev/null
                 fi
                 vault write pki/roles/davtro-ingress \
                   allowed_domains="davtro.local,spark.davtro.local" \
