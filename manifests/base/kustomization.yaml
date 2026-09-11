@@ -3,6 +3,13 @@ kind: Kustomization
 
   # - service-monitors.yaml  # odkomentuj jesli zainstalowany Prometheus Operator
   # - vault-servicemonitor.yaml  # odkomentuj jesli zainstalowany Prometheus Operator
+# KROK 5 (PKI): Vault CA + cert-manager. ODKOMENTUJ po instalacji CRD
+# cert-managera na klastrze (helm install --set crds.enabled=true) - bez nich
+# ArgoCD sync padnie (nieznane Kindy ClusterIssuer/Certificate), jak kiedys z ESO.
+# Kolejnosc celowa: issuer przed certami. Infra (raz, poza Gitem):
+# microk8s enable ingress + helm install cert-manager + SA/token (patrz pki-issuer.yaml).
+# - pki-issuer.yaml
+# - certificates.yaml
 resources:
 - namespace.yaml
 - serviceaccount.yaml
@@ -34,28 +41,21 @@ resources:
 - kafka-ui.yaml
 - network-policies.yaml
 - ingress.yaml
-# KROK 5 (PKI): Vault CA + cert-manager. ODKOMENTUJ po instalacji CRD
-# cert-managera na klastrze (helm install --set crds.enabled=true) - bez nich
-# ArgoCD sync padnie (nieznane Kindy ClusterIssuer/Certificate), jak kiedys z ESO.
-# Kolejnosc celowa: issuer przed certami. Infra (raz, poza Gitem):
-# microk8s enable ingress + helm install cert-manager + SA/token (patrz pki-issuer.yaml).
-# - pki-issuer.yaml
-# - certificates.yaml
 - kyverno-policy.yaml
 
 images:
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-  newTag: 2b76643d73edaefa54e499619962f02fe00bc311
+  newTag: 2dad93b48437d7be2eb54bf11bdc66cabe64063f
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
-  newTag: 2b76643d73edaefa54e499619962f02fe00bc311
+  newTag: 2dad93b48437d7be2eb54bf11bdc66cabe64063f
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
-  newTag: 2b76643d73edaefa54e499619962f02fe00bc311
+  newTag: 2dad93b48437d7be2eb54bf11bdc66cabe64063f
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
-  newTag: 2b76643d73edaefa54e499619962f02fe00bc311
+  newTag: 2dad93b48437d7be2eb54bf11bdc66cabe64063f
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
-  newTag: 2b76643d73edaefa54e499619962f02fe00bc311
+  newTag: 2dad93b48437d7be2eb54bf11bdc66cabe64063f
