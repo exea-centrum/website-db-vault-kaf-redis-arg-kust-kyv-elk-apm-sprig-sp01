@@ -1,0 +1,31 @@
+# KROK 5 (PKI): cert-manager zamawia certy w Vault PKI, sam odnawia przed
+# wygasnieciem (renewBefore) i sklada je w Sekrety tls.crt/tls.key.
+# Wymaga na klastrze (raz, poza Gitem): microk8s enable ingress + cert-manager
+# z CRD (helm install jetstack/cert-manager --set crds.enabled=true).
+# ClusterIssuer jest klastrowy (cert-manager potrzebuje roli K8s auth w Vault),
+# a Certificate leza w davtro02 obok Ingressow, ktore je konsumuja (spec.tls).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: vault-issuer
+spec:
+  vault:
+    server: http://vault.davtro02.svc.cluster.local:8200
+    path: pki/sign/davtro-ingress
+    auth:
+      kubernetes:
+        mountPath: kubernetes
+        role: cert-manager
+        secretRef:
+          name: cert-manager-vault-token
+          key: token
+---
+# UWAGA: ServiceAccount + Secret token NIE są w Gicie celowo.
+# Kustomize (overlays: namespace davtro02) nadpisałby im namespace na davtro02,
+# a ClusterIssuer wymaga sekretu w ns cert-manager. Po `helm install cert-manager`
+# wykonaj RAZ (poza GitOps):
+#   kubectl -n cert-manager create serviceaccount cert-manager-vault
+#   kubectl -n cert-manager create secret generic cert-manager-vault-token \
+#     --from-literal=token="$(kubectl -n cert-manager create token cert-manager-vault --duration=87600h)"
+# Rola Vault `cert-manager` (tworzy vault-bootstrap) akceptuje SA
+# cert-manager-vault ORAZ domyslny SA chartu (cert-manager) w ns cert-manager.

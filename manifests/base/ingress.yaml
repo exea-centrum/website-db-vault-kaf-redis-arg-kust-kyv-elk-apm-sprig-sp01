@@ -7,6 +7,12 @@ metadata:
     argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   ingressClassName: public
+  # KROK 5 (PKI): terminacja TLS certem z cert-managera (Secret davtro-tls,
+  # Certificate/davtro-tls <- ClusterIssuer/vault-issuer <- Vault PKI).
+  # Bez kontrolera ingress + cert-managera pole czeka (Ingress bez adresu).
+  tls:
+    - hosts: [davtro.local]
+      secretName: davtro-tls
   rules:
     - host: davtro.local
       http:
@@ -41,6 +47,10 @@ metadata:
     argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   ingressClassName: public
+  # KROK 5 (PKI): jak wyzej (Secret spark-tls <- Certificate/spark-tls).
+  tls:
+    - hosts: [spark.davtro.local]
+      secretName: spark-tls
   rules:
     - host: spark.davtro.local
       http:

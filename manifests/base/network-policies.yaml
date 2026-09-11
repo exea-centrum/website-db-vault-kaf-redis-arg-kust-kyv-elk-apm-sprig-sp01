@@ -65,3 +65,62 @@ spec:
     - from: []
       ports: [{ protocol: TCP, port: 8080 }]
   policyTypes: [Ingress]
+---
+# KROK 5 (PKI): kontroler ingress (ns ingress, po `microk8s enable ingress`)
+# musi dobic do backendow po HTTP (terminacja TLS na kontrolerze).
+# Bez tej reguly default-deny odcina ruch kontroler -> fastapi/frontend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-web
+  namespace: davtro02
+spec:
+  podSelector:
+    matchLabels:
+      app: fastapi-web-app
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - { protocol: TCP, port: 8080 }
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-frontend
+  namespace: davtro02
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - { protocol: TCP, port: 8080 }
+  policyTypes: [Ingress]
+---
+# KROK 5 (PKI): cert-manager (ns cert-manager) musi dobic do Vaulta :8200
+# (ClusterIssuer/vault-issuer sklada CSR przez pki/sign/davtro-ingress).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-certmanager-to-vault
+  namespace: davtro02
+spec:
+  podSelector:
+    matchLabels:
+      app: vault
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cert-manager
+      ports:
+        - { protocol: TCP, port: 8200 }
+  policyTypes: [Ingress]

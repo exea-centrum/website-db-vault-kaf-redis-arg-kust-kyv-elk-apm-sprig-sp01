@@ -34,6 +34,13 @@ resources:
 - kafka-ui.yaml
 - network-policies.yaml
 - ingress.yaml
+# KROK 5 (PKI): Vault CA + cert-manager. ODKOMENTUJ po instalacji CRD
+# cert-managera na klastrze (helm install --set crds.enabled=true) - bez nich
+# ArgoCD sync padnie (nieznane Kindy ClusterIssuer/Certificate), jak kiedys z ESO.
+# Kolejnosc celowa: issuer przed certami. Infra (raz, poza Gitem):
+# microk8s enable ingress + helm install cert-manager + SA/token (patrz pki-issuer.yaml).
+# - pki-issuer.yaml
+# - certificates.yaml
 - kyverno-policy.yaml
 
 images:
