@@ -3,13 +3,11 @@ kind: Kustomization
 
   # - service-monitors.yaml  # odkomentuj jesli zainstalowany Prometheus Operator
   # - vault-servicemonitor.yaml  # odkomentuj jesli zainstalowany Prometheus Operator
-# KROK 5 (PKI): Vault CA + cert-manager. ODKOMENTUJ po instalacji CRD
-# cert-managera na klastrze (helm install --set crds.enabled=true) - bez nich
-# ArgoCD sync padnie (nieznane Kindy ClusterIssuer/Certificate), jak kiedys z ESO.
-# Kolejnosc celowa: issuer przed certami. Infra (raz, poza Gitem):
-# microk8s enable ingress + helm install cert-manager + SA/token (patrz pki-issuer.yaml).
-# - pki-issuer.yaml
-# - certificates.yaml
+# KROK 5 (PKI): Vault CA + cert-manager. AKTYWNE - cert-manager zainstalowany
+# na klastrze (CRD ClusterIssuer/Certificate istnieja, SA cert-manager-vault +
+# Secret cert-manager-vault-token gotowe). Kolejnosc celowa: issuer przed certami.
+- pki-issuer.yaml
+- certificates.yaml
 resources:
 - namespace.yaml
 - serviceaccount.yaml
