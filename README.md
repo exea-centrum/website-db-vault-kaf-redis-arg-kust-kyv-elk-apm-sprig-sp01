@@ -376,3 +376,507 @@ postgres / fastapi / message-processor / spring-app / pgadmin / postgres-exporte
                     | NetworkPolicy deny+allow | Kyverno Enforce |
                     +--------------------------------------------+
 ```
+
+## 9. Szczegółowy opis architektury i przepływu
+
+### 9.1 Diagram przepływu (Full Stack)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    GITHUB (main branch)                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │ CI/CD Pipeline (.github/workflows/ci-cd.yaml)                                   │   │
+│  │  1. Build 5 obrazów Docker (api, consumer, frontend, spring, spark) -> GHCR     │   │
+│  │  2. kustomize edit set image -> tagi w manifests/base/kustomization.yaml        │   │
+│  │  3. git commit + git push                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+                                          │
+                                          │ webhook / auto-sync (3min)
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    ARGOCD (namespace: argocd)                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │ Application: davtro-website                                                      │   │
+│  │  source: manifests/overlays/production -> ../../base                            │   │
+│  │  destination: https://kubernetes.default.svc, namespace: davtro02               │   │
+│  │  syncPolicy: automated (prune: true, selfHeal: true)                           │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+                                          │
+                                          │ kustomize build + apply
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              MICROK8S CLUSTER (namespace: davtro02)                     │
+│                                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              EDGE LAYER (Ingress + TLS)                         │   │
+│  │  ┌──────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ Ingress Controller (nginx, microk8s enable ingress)                     │  │   │
+│  │  │  TLS termination: cert-manager + Vault PKI                             │  │   │
+│  │  │  Hosts: davtro.local, spark.davtro.local                                │  │   │
+│  │  │  Secrets: davtro-tls, spark-tls (auto-rotowane przez cert-manager)     │  │   │
+│  │  └──────────────────────────────────────────────────────────────────────────┘  │   │
+│  │         │                    │                    │                    │          │
+│  │    /api -> fastapi      / -> frontend      /grafana -> grafana   /spark -> spark │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              APPLICATION LAYER                                  │   │
+│  │                                                                                 │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │   │
+│  │  │ fastapi-web-app  │  │ message-processor│  │ spring-app       │              │   │
+│  │  │ (Python/FastAPI) │  │ (Kafka consumer) │  │ (Java/Spring)    │              │   │
+│  │  │ :8080, replicas:3│  │ :8080, replicas:1│  │ :8081, replicas:1│              │   │
+│  │  │ HPA: 2-8, CPU70% │  │                  │  │                  │              │   │
+│  │  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘              │   │
+│  │           │ Kafka produce        │ Kafka consume        │                        │   │
+│  │           ▼                      ▼                      ▼                        │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │   │
+│  │  │ frontend (nginx) │  │ spark-master     │  │ spark-worker (x2)│              │   │
+│  │  │ :8080, replicas:2│  │ :8082, :4040     │  │ :8083             │              │   │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘              │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+```
+
+### 9.2 Data Layer
+
+```
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              DATA LAYER                                         │   │
+│  │                                                                                 │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │   │
+│  │  │ postgres-db      │  │ redis            │  │ kafka-kraft      │              │   │
+│  │  │ (StatefulSet)    │  │ (Deployment)     │  │ (StatefulSet)    │              │   │
+│  │  │ :5432            │  │ :6379            │  │ :9092            │              │   │
+│  │  │ PVC: 5Gi         │  │ cache layer      │  │ topics:          │              │   │
+│  │                                               └──────────────────┘              │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+```
+
+### 9.3 Secrets Layer (Vault + ESO)
+
+```
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              SECRETS LAYER (Vault + ESO)                         │   │
+│  │                                                                                 │   │
+│  │  ┌──────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ vault-0 (StatefulSet, raft storage na PVC 2Gi)                           │  │   │
+│  │  │  :8200 (API)                                                             │  │   │
+│  │  │  Engines:                                                                │  │   │
+│  │  │   - kv-v2: davtro/db, davtro/smtp (sekrety aplikacji)                   │  │   │
+│  │  │   - database: postgres-clusterip (dynamiczne credsy)                    │  │   │
+│  │  │   - pki: davtro-internal CA (certyfikaty TLS)                            │  │   │
+│  │  │  Auth: kubernetes (SA davtro-sa), token (cert-manager)                   │  │   │
+│  │  └──────────────────────────────────────────────────────────────────────────┘  │   │
+│  │           ▲                                       ▲                              │   │
+│  │           │ K8s auth (jwt)                        │ token auth                   │   │
+│  │           │                                       │                              │   │
+│  │  ┌────────┴───────────────────────────────────────┴─────────────────────────┐  │   │
+│  │  │ vault-bootstrap (Deployment, self-heal co 60s)                           │  │   │
+│  │  │  1. vault operator init (1 key share) -> bootstrap-keys na PVC           │  │   │
+│  │  │  2. vault operator unseal (auto-unseal z pliku)                         │  │   │
+│  │  │  3. kv-v2: davtro/db, davtro/smtp (generuje DB_PASSWORD jeśli brak)     │  │   │
+│  │  │  4. audit: stdout -> promtail -> Loki -> Grafana                         │  │   │
+│  │  │  5. auth/kubernetes/config + role davtro-apps, davtro-snapshot           │  │   │
+│  │  │  6. database engine + role davtro-app-rw (TTL 1h/24h)                    │  │   │
+│  │  │  7. PKI: root CA + roles davtro-ingress, davtro-internal                 │  │   │
+│  │  │  8. Policy pki-issuer + role cert-manager (token auth)                  │  │   │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                                 │   │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ External Secrets Operator (namespace: external-secrets)                  │  │   │
+│  │  │  SecretStore vault-backend: kv-v2, K8s auth, role davtro-apps           │  │   │
+│  │  │  SecretStore vault-dynamic: database engine (bez path prefix)           │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  ExternalSecret davtro-secrets -> Secret davtro-secrets (refresh: 1h)    │  │   │
+│  │  │   DB_USER, DB_PASSWORD, SMTP_USER, SMTP_PASSWORD                        │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  VaultDynamicSecret db-creds-davtro-app-rw                              │  │   │
+│  │  │   -> ExternalSecret fastapi-db-creds (refresh: 30m)                      │  │   │
+│  │  │   -> ExternalSecret message-processor-db-creds (refresh: 30m)            │  │   │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                                 │   │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ cert-manager (namespace: cert-manager)                                   │  │   │
+│  │  │  ClusterIssuer vault-issuer:                                             │  │   │
+│  │  │   server: http://vault.davtro02.svc.cluster.local:8200                   │  │   │
+│  │  │   path: pki/sign/davtro-ingress                                          │  │   │
+│  │  │   auth: tokenSecretRef cert-manager-vault-token                          │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  Certificate davtro-tls:                                                 │  │   │
+│  │  │   Secret: davtro-tls, CN=davtro.local, duration: 90d, renew: 15d        │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  Certificate spark-tls:                                                  │  │   │
+│  │  │   Secret: spark-tls, CN=spark.davtro.local, duration: 90d, renew: 15d   │  │   │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+```
+### 9.3 Secrets Layer (Vault + ESO)
+
+```
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              SECRETS LAYER (Vault + ESO)                         │   │
+│  │                                                                                 │   │
+│  │  ┌──────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ vault-0 (StatefulSet, raft storage na PVC 2Gi)                           │  │   │
+│  │  │  :8200 (API)                                                             │  │   │
+│  │  │  Engines:                                                                │  │   │
+│  │  │   - kv-v2: davtro/db, davtro/smtp (sekrety aplikacji)                   │  │   │
+│  │  │   - database: postgres-clusterip (dynamiczne credsy)                    │  │   │
+│  │  │   - pki: davtro-internal CA (certyfikaty TLS)                            │  │   │
+│  │  │  Auth: kubernetes (SA davtro-sa), token (cert-manager)                   │  │   │
+│  │  └──────────────────────────────────────────────────────────────────────────┘  │   │
+│  │           ▲                                       ▲                              │   │
+│  │           │ K8s auth (jwt)                        │ token auth                   │   │
+│  │           │                                       │                              │   │
+│  │  ┌────────┴───────────────────────────────────────┴─────────────────────────┐  │   │
+│  │  │ vault-bootstrap (Deployment, self-heal co 60s)                           │  │   │
+│  │  │  1. vault operator init (1 key share) -> bootstrap-keys na PVC           │  │   │
+│  │  │  2. vault operator unseal (auto-unseal z pliku)                         │  │   │
+│  │  │  3. kv-v2: davtro/db, davtro/smtp (generuje DB_PASSWORD jeśli brak)     │  │   │
+│  │  │  4. audit: stdout -> promtail -> Loki -> Grafana                         │  │   │
+│  │  │  5. auth/kubernetes/config + role davtro-apps, davtro-snapshot           │  │   │
+│  │  │  6. database engine + role davtro-app-rw (TTL 1h/24h)                    │  │   │
+│  │  │  7. PKI: root CA + roles davtro-ingress, davtro-internal                 │  │   │
+│  │  │  8. Policy pki-issuer + role cert-manager (token auth)                  │  │   │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                                 │   │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ External Secrets Operator (namespace: external-secrets)                  │  │   │
+│  │  │  SecretStore vault-backend: kv-v2, K8s auth, role davtro-apps           │  │   │
+│  │  │  SecretStore vault-dynamic: database engine (bez path prefix)           │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  ExternalSecret davtro-secrets -> Secret davtro-secrets (refresh: 1h)    │  │   │
+│  │  │   DB_USER, DB_PASSWORD, SMTP_USER, SMTP_PASSWORD                        │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  VaultDynamicSecret db-creds-davtro-app-rw                              │  │   │
+│  │  │   -> ExternalSecret fastapi-db-creds (refresh: 30m)                      │  │   │
+│  │  │   -> ExternalSecret message-processor-db-creds (refresh: 30m)            │  │   │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                                 │   │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ cert-manager (namespace: cert-manager)                                   │  │   │
+│  │  │  ClusterIssuer vault-issuer:                                             │  │   │
+│  │  │   server: http://vault.davtro02.svc.cluster.local:8200                   │  │   │
+│  │  │   path: pki/sign/davtro-ingress                                          │  │   │
+│  │  │   auth: tokenSecretRef cert-manager-vault-token                          │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  Certificate davtro-tls:                                                 │  │   │
+│  │  │   Secret: davtro-tls, CN=davtro.local, duration: 90d, renew: 15d        │  │   │
+│  │  │                                                                          │  │   │
+│  │  │  Certificate spark-tls:                                                  │  │   │
+│  │  │   Secret: spark-tls, CN=spark.davtro.local, duration: 90d, renew: 15d   │  │   │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+```
+
+### 9.4 Observability Layer + Network Policies + Backup
+
+```
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              OBSERVABILITY LAYER                                 │   │
+│  │                                                                                 │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │   │
+│  │  │ prometheus       │  │ grafana          │  │ loki             │              │   │
+│  │  │ :9090            │  │ :3000            │  │ :3100            │              │   │
+│  │  │ metrics scrape   │  │ dashboards       │  │ log aggregation  │              │   │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘              │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │   │
+│  │  │ tempo            │  │ promtail         │  │ kafka-ui         │              │   │
+│  │  │ :3200            │  │ (DaemonSet)      │  │ :8080            │              │   │
+│  │  │ trace storage    │  │ log collection   │  │ Kafka management │              │   │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘              │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐                                    │   │
+│  │  │ pgadmin          │  │ exporters        │                                    │   │
+│  │  │ :80              │  │ postgres, kafka, │                                    │   │
+│  │  │ DB management    │  │ node             │                                    │   │
+│  │  └──────────────────┘  └──────────────────┘                                    │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              NETWORK POLICIES                                    │   │
+│  │  default-deny-ingress (zamyka wszystko)                                          │   │
+│  │  allow-intra-namespace (ruch wewnątrz davtro02)                                  │   │
+│  │  allow-eso-to-vault (external-secrets -> vault:8200)                             │   │
+│  │  allow-certmanager-to-vault (cert-manager -> vault:8200)                         │   │
+│  │  allow-ingress-controller-to-web (ingress -> fastapi/frontend:8080)              │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              BACKUP LAYER                                        │   │
+│  │  vault-snapshot (CronJob, 03:00 daily) -> PVC vault-backup (retencja 14 dni)     │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.5 Odpowiedzialność komponentów
+
+| Komponent | Plik(y) | Odpowiedzialność |
+|-----------|---------|------------------|
+| **ArgoCD** | `argocd/application.yaml` | GitOps: synchronizuje stan klastra z repozytorium. Auto-sync co 3 minuty, self-heal (naprawia ręczne zmiany), prune (usuwa zasoby nie w Git). |
+| **GitHub Actions** | `.github/workflows/ci-cd.yaml` | CI: buduje 5 obrazów Docker (api, consumer, frontend, spring, spark) i push do GHCR. Aktualizuje tagi w `manifests/base/kustomization.yaml`. |
+| **Kustomize** | `manifests/base/kustomization.yaml` | Deklaracja wszystkich zasobów K8s. Overlay production nadpisuje namespace, replica count, image tags. |
+| **Vault** | `vault.yaml`, `vault-bootstrap.yaml` | Centralne zarządzanie sekretami: KV v2 (sekrety aplikacji), database engine (dynamiczne credsy), PKI (certyfikaty TLS), autoryzacja (K8s + token). |
+| **vault-bootstrap** | `vault-bootstrap.yaml` | Automatyczna inicjalizacja Vault: init, unseal, konfiguracja KV/auth/database/PKI. Self-heal co 60s. |
+| **External Secrets Operator** | `secret-store.yaml`, `external-secrets.yaml`, `external-secrets-db-dynamic.yaml` | Most między Vault a Kubernetes: synchronizuje sekrety z Vault do K8s Secrets. |
+| **cert-manager** | `pki-issuer.yaml`, `certificates.yaml` | Zarządzanie certyfikatami TLS: zamawia z Vault PKI, automatycznie odnawia przed wygaśnięciem. |
+| **Ingress Controller** | `ingress.yaml`, `network-policies.yaml` | Reverse proxy: terminacja TLS, routing do usług (fastapi, frontend, grafana, spark). |
+| **Kyverno** | `kyverno-policy.yaml` | Polityki bezpieczeństwa: wymagane requests/limits, zakaz kontenerów uprzywilejowanych, zaufane rejestry. |
+
+### 9.6 Przepływ sekretów (Vault -> Aplikacja)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ VAULT (namespace: davtro02)                                                 │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ KV v2 Engine (mount: davtro)                                        │   │
+│  │  davtro/db: { DB_USER: davtro, DB_PASSWORD: *** }                  │   │
+│  │  davtro/smtp: { SMTP_USER: ***, SMTP_PASSWORD: *** }               │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ K8s auth (SA davtro-sa, role davtro-apps)   │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ ExternalSecret davtro-secrets (refresh: 1h)                         │   │
+│  │  -> Secret davtro-secrets (namespace: davtro02)                     │   │
+│  │     DB_USER, DB_PASSWORD, SMTP_USER, SMTP_PASSWORD                  │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ envFrom: secretRef                          │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Aplikacje: fastapi, message-processor, spring-app                   │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ VAULT (namespace: davtro02)                                                 │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Database Engine (mount: database)                                   │   │
+│  │  Role: davtro-app-rw                                                │   │
+│  │    creation: CREATE ROLE ... LOGIN PASSWORD ... VALID UNTIL ...     │   │
+│  │    revocation: DROP ROLE ...                                        │   │
+│  │    default_ttl: 1h, max_ttl: 24h                                    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ K8s auth (SA davtro-sa, role davtro-apps)   │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ VaultDynamicSecret db-creds-davtro-app-rw                           │   │
+│  │  -> POST /v1/database/creds/davtro-app-rw                          │   │
+│  │  -> generuje: { username: v-token-davtro-app-rw-xxx, password: *** }│   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ ExternalSecret (refresh: 30m)              │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Secrets: fastapi-db-creds, message-processor-db-creds               │   │
+│  │  zawartość: { username: ..., password: ... }                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ volumeMount: /etc/db-creds (read-only)     │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Aplikacje:                                                          │   │
+│  │  fastapi: DB_USER_FILE=/etc/db-creds/username                       │   │
+│  │           DB_PASSWORD_FILE=/etc/db-creds/password                   │   │
+│  │           (main.py watch_db_creds: przeladowuje pool przy zmianie)  │   │
+│  │  message-processor: DB_USER_FILE, DB_PASSWORD_FILE                  │   │
+│  │                      (db.py: przeladowuje SQLAlchemy)               │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.7 Przepływ certyfikatów (Vault PKI -> Ingress)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ VAULT PKI (namespace: davtro02)                                            │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ PKI Engine (mount: pki)                                             │   │
+│  │  Root CA: davtro-internal (self-signed, homelab)                    │   │
+│  │   CN=davtro-internal CA, TTL=87600h (10 lat)                        │   │
+│  │                                                                     │   │
+│  │  Roles:                                                             │   │
+│  │   davtro-ingress:                                                   │   │
+│  │     allowed_domains: davtro.local, spark.davtro.local               │   │
+│  │     allow_subdomains: true, max_ttl: 2160h (90d)                    │   │
+│  │   davtro-internal:                                                  │   │
+│  │     allowed_domains: svc.cluster.local, cluster.local               │   │
+│  │     allow_any_name: true, enforce_hostnames: false                  │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ token auth (cert-manager-vault-token)       │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ ClusterIssuer vault-issuer (cert-manager)                           │   │
+│  │  server: http://vault.davtro02.svc.cluster.local:8200               │   │
+│  │  path: pki/sign/davtro-ingress                                      │   │
+│  │  auth: tokenSecretRef cert-manager-vault-token                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ Certificate resources                        │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Certificate davtro-tls                                              │   │
+│  │  Secret: davtro-tls, CN=davtro.local                                │   │
+│  │  duration: 2160h (90d), renewBefore: 360h (15d)                     │   │
+│  │                                                                     │   │
+│  │ Certificate spark-tls                                               │   │
+│  │  Secret: spark-tls, CN=spark.davtro.local                           │   │
+│  │  duration: 2160h (90d), renewBefore: 360h (15d)                     │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ cert-manager generuje Secret z tls.crt/tls.key
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Secrets: davtro-tls, spark-tls (type: kubernetes.io/tls)            │   │
+│  │  zawartość: { tls.crt: <cert PEM>, tls.key: <key PEM> }             │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                               │
+│                              │ Ingress spec.tls.secretName                  │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Ingress Controller (nginx)                                          │   │
+│  │  TLS termination na poziomie Ingress                                │   │
+│  │  Hosts: davtro.local, spark.davtro.local                            │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.8 Co jest potrzebne poza projektem (wymagania zewnętrzne)
+
+| Komponent | Instalacja | Status w projekcie |
+|-----------|------------|-------------------|
+| **MicroK8s** | `snap install microk8s --classic` | Wymagany jako runtime |
+| **Ingress Controller** | `microk8s enable ingress` | CRD + Deployment w namespace `ingress` |
+| **cert-manager** | `helm install jetstack/cert-manager --set crds.enabled=true` | CRD ClusterIssuer/Certificate wymagane przed syncem |
+| **External Secrets Operator** | `helm install external-secrets external-secrets/external-secrets -n external-secrets` | CRD ExternalSecret/SecretStore wymagane przed syncem |
+| **Kyverno** | `helm install kyverno kyverno/kyverno -n kyverno` | CRD ClusterPolicy wymagane przed syncem |
+| **GitHub Container Registry** | Public package visibility | Obrazy Docker: `ghcr.io/<org>/...` |
+| **DNS** | Wpisy A/CNAME dla `davtro.local`, `spark.davtro.local` | Wymagane dla dostępu z zewnątrz |
+
+
+### 9.9 Czy działa full automatic deployment?
+
+**TAK** — po jednorazowej instalacji komponentów zewnętrznych, cały pipeline działa automatycznie:
+
+```
+1. Developer push do main branch
+2. GitHub Actions buduje 5 obrazów Docker -> GHCR
+3. GitHub Actions aktualizuje tagi w kustomization.yaml -> git push
+4. ArgoCD wykrywa zmiany (co 3 min) -> kustomize build -> apply
+5. Pody są rolling update z nowymi obrazami
+6. cert-manager monitoruje Certificate resources -> odnawia TLS przed wygaśnięciem
+7. ESO synchronizuje sekrety z Vault co 1h (static) / 30min (dynamic)
+8. vault-bootstrap self-heal co 60s (naprawia stan Vault po restarcie)
+9. vault-snapshot CronJob codziennie o 03:00 -> backup raft na PVC
+```
+
+
+### 9.10 Czy można wstawić zewnętrzne certyfikaty?
+
+**TAK** — 3 opcje:
+
+**Opcja A: Import do Vault PKI (zalecane)**
+```bash
+# Wygeneruj CSR przez cert-manager, podpisz zewnętrznym CA, importuj do Vault
+vault write pki/intermediate/set-signed certificate=@intermediate.cert.pem
+# Vault PKI przejmuje zarządzanie rotacją
+```
+
+**Opcja B: Ręczny Secret (bez cert-manager)**
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: davtro-tls
+  namespace: davtro02
+type: kubernetes.io/tls
+data:
+  tls.crt: <base64 encoded cert>
+  tls.key: <base64 encoded key>
+```
+Następnie zmień `ingress.yaml` aby używał tego Secrets. **Uwaga**: brak auto-rotacji — trzeba ręcznie aktualizować.
+
+**Opcja C: cert-manager + Let's Encrypt (dla publicznych domen)**
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@davtro.local
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: public
+```
+
+
+### 9.11 Rotacja certyfikatów, tokenów i kluczy
+
+| Zasób | Mechanizm rotacji | Lokalizacja | Częstotliwość |
+|-------|-------------------|-------------|---------------|
+| **Certyfikaty TLS** (davtro-tls, spark-tls) | cert-manager odnawia automatycznie `renewBefore: 360h (15d)` przed expiry | Secret: `davtro-tls`, `spark-tls` (ns davtro02) | Co 90 dni (auto) |
+| **Vault PKI Root CA** | Brak auto-rotacji (10 lat TTL). Rotacja ręczna: nowy CA + re-sign wszystkich certów | Vault PKI engine | Ręcznie (rocznie) |
+| **Dynamiczne credsy DB** | Vault database engine generuje nowe przy każdym request. Stare TTL 1h -> automatycznie wygasa | Secret: `fastapi-db-creds`, `message-processor-db-creds` (ns davtro02) | Co 30 min (ESO refresh) |
+| **KV sekrety** (davtro/db, davtro/smtp) | ESO synchronizuje z Vault. Ręczna zmiana w Vault -> ESO podłapie | Secret: `davtro-secrets` (ns davtro02) | Co 1h (ESO refresh) |
+| **cert-manager-vault-token** | Ręczna: `vault token create` -> update Secret | Secret: `cert-manager-vault-token` (ns cert-manager) | Ręcznie (rocznie) |
+| **Vault unseal key** | Na PVC `/vault/data/bootstrap-keys` (tryb 1-of-1, homelab). Produkcja: auto-unseal (cloud KMS) | PVC: vault-data-vault-0 | Ręcznie (po każdym restarcie) |
+| **Vault snapshot** | CronJob codziennie 03:00, retencja 14 dni | PVC: vault-backup | Codziennie |
+| **Docker obrazy** | GitHub Actions po każdym push do main | GHCR | Każdy commit |
+
+### 9.12 Gdzie są przechowywane sekrety i certyfikaty
+
+```
+PRZECHOWYWANIE SEKRETÓW
+
+  VAULT (namespace: davtro02)
+   /vault/data/ (PVC 2Gi)
+    - bootstrap-keys (unseal key + root token, chmod 600)
+    - raft/ (stan Vault: KV, auth, policies)
+
+  KUBERNETES SECRETS (namespace: davtro02)
+   davtro-secrets: DB_USER, DB_PASSWORD, SMTP_USER, SMTP_PASSWORD
+   fastapi-db-creds: username, password (dynamiczne)
+   message-processor-db-creds: username, password (dynamiczne)
+   davtro-tls: tls.crt, tls.key (auto-rotowane)
+   spark-tls: tls.crt, tls.key (auto-rotowane)
+
+  KUBERNETES SECRETS (namespace: cert-manager)
+   cert-manager-vault-token: token (Vault auth dla cert-manager)
+
+  PVC (namespace: davtro02)
+   vault-backup: snapshot-*.snap (codziennie, retencja 14 dni)
+```
+
+
+### 9.13 Potwierdzenie działania (stan aktualny)
+
+```
+CERTYFIKATY:
+  davtro-tls: Ready=True, CN=davtro.local, Issuer=vault-issuer, Expiry=2026-12-11
+  spark-tls:  Ready=True, CN=spark.davtro.local, Issuer=vault-issuer, Expiry=2026-12-11
+
+CLUSTERISSUER:
+  vault-issuer: Ready=True (token auth)
+
+ARGODCD:
+  davtro-website: SYNC=Synced, HEALTH=Healthy
+
+PODY (23 Running, 0 Errors):
+  fastapi-web-app (3 replicas), frontend (2), message-processor, spring-app
+  postgres-db, redis, kafka-kraft, kafka-ui
+  vault-0, vault-bootstrap
+  spark-master, spark-worker (2)
+  prometheus, grafana, loki, tempo, promtail
+  postgres-exporter, kafka-exporter, node-exporter
+  pgadmin
+```
