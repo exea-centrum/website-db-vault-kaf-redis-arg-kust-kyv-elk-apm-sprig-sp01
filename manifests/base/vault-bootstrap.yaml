@@ -57,6 +57,7 @@ data:
   pki-issuer.hcl: |
     path "pki/sign/davtro-ingress" { capabilities = ["create", "update"] }
     path "pki/issue/davtro-ingress" { capabilities = ["create", "update"] }
+    path "pki/sign/davtro-internal" { capabilities = ["create", "update"] }
     path "pki/issue/davtro-internal" { capabilities = ["create", "update"] }
   # KROK 6 (mTLS): policy dla certyfikatow wewnetrznych (davtro-internal).
   # Używane przez vault-issuer-internal do wystawiania certow client-cert.
