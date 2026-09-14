@@ -57,7 +57,11 @@ data:
   pki-issuer.hcl: |
     path "pki/sign/davtro-ingress" { capabilities = ["create", "update"] }
     path "pki/issue/davtro-ingress" { capabilities = ["create", "update"] }
+  # KROK 6 (mTLS): policy dla certyfikatow wewnetrznych (davtro-internal).
+  # Używane przez vault-issuer-internal do wystawiania certow client-cert.
+  pki-internal.hcl: |
     path "pki/issue/davtro-internal" { capabilities = ["create", "update"] }
+    path "pki/sign/davtro-internal" { capabilities = ["create", "update"] }
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -291,6 +295,13 @@ spec:
                   bound_service_account_names="cert-manager,cert-manager-vault" \
                   bound_service_account_namespaces="cert-manager" \
                   policies=pki-issuer ttl=1h >/dev/null
+                # KROK 6 (mTLS): osobny policy + rola auth dla certow wewnetrznych.
+                # vault-issuer-internal uzywa tej roli do wystawiania certow client-cert.
+                vault policy write pki-internal /sql/pki-internal.hcl >/dev/null
+                vault write auth/kubernetes/role/cert-manager-internal \
+                  bound_service_account_names="cert-manager,cert-manager-vault" \
+                  bound_service_account_namespaces="cert-manager" \
+                  policies=pki-internal ttl=1h >/dev/null
                 # --- KROK 6 (Transit): silnik szyfrowania danych aplikacyjnych.
                 # Aplikacje szyfrują wrażliwe dane (PII, telefony, e-maile) przed zapisem.
                 # Vault zarządza KEK (Key Encryption Key), aplikacje trzymają DEK w pamięci.
