@@ -1,6 +1,7 @@
 # KROK 6 (mTLS): certyfikaty klienta dla usług wewnętrznych.
-# Usługi wzajemnie się autoryzują po TLS (mTLS) - wymagany cert client-cert.
-# vault-issuer-internal używa pki/issue/davtro-internal (Vault PKI role davtro-internal).
+# UWAGA: dla Vault issuer przez endpoint pki/issue/* cert-manager wymaga
+# certificateRequestPolicy=SignVerbatim (zachowanie klucza publicznego z CSR).
+# Bez tego: "public key does not match the CSR" (InvalidCertificate).
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -16,6 +17,10 @@ spec:
     - fastapi-web-app.davtro02.svc.cluster.local
     - fastapi-web-app-svc.davtro02.svc
     - fastapi-web-app-svc.davtro02.svc.cluster.local
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
   issuerRef:
     name: vault-issuer-internal
     kind: ClusterIssuer
@@ -39,6 +44,10 @@ spec:
   dnsNames:
     - message-processor.davtro02.svc
     - message-processor.davtro02.svc.cluster.local
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
   issuerRef:
     name: vault-issuer-internal
     kind: ClusterIssuer
@@ -64,6 +73,10 @@ spec:
     - spring-app.davtro02.svc.cluster.local
     - spring-app-svc.davtro02.svc
     - spring-app-svc.davtro02.svc.cluster.local
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
   issuerRef:
     name: vault-issuer-internal
     kind: ClusterIssuer
