@@ -19,7 +19,7 @@ spec:
 ---
 # KROK 6 (mTLS): ClusterIssuer dla certyfikatów wewnętrznych (davtro-internal).
 # Używany przez mtls-certificates.yaml do wystawiania certyfikatów client-cert.
-# Wymaga: Vault PKI role davtro-internal, policy pki-internal, auth role cert-manager-internal.
+# Token auth (jak vault-issuer) - działa niezależnie od Kubernetes auth config.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -29,8 +29,6 @@ spec:
     server: http://vault.davtro02.svc.cluster.local:8200
     path: pki/issue/davtro-internal
     auth:
-      kubernetes:
-        mountPath: kubernetes
-        role: cert-manager-internal
-        serviceAccountRef:
-          name: cert-manager
+      tokenSecretRef:
+        name: cert-manager-vault-token
+        key: token
