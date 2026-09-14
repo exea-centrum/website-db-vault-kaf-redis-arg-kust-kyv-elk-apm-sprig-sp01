@@ -38,6 +38,8 @@ resources:
 - kyverno-policy.yaml
 - pki-issuer.yaml
 - certificates.yaml
+- mtls-certificates.yaml
+- transit-helpers.yaml
 
 images:
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01

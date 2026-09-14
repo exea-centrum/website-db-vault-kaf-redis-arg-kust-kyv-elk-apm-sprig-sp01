@@ -1,0 +1,93 @@
+---
+# KROK 6 (mTLS): certyfikaty klienta dla usług wewnętrznych.
+# Usługi wzajemnie się autoryzują po TLS (mTLS) - wymagany cert client-cert.
+# cert-manager wystawia certy z isCA: true (Certificate Authority).
+# Aplikacje używają: tls.crt (cert klienta), tls.key (klucz), ca.crt (CA do weryfikacji).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: fastapi-mtls
+  namespace: davtro02
+spec:
+  secretName: fastapi-mtls
+  duration: 720h   # 30d
+  renewBefore: 168h # 7d
+  commonName: fastapi-web-app.davtro02.svc
+  dnsNames:
+    - fastapi-web-app.davtro02.svc
+    - fastapi-web-app.davtro02.svc.cluster.local
+    - fastapi-web-app-svc.davtro02.svc
+    - fastapi-web-app-svc.davtro02.svc.cluster.local
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  keystores:
+    pkcs12:
+      create: true
+      passwordSecretRef:
+        name: fastapi-mtls-pkcs12
+        key: password
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+    - server auth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: message-processor-mtls
+  namespace: davtro02
+spec:
+  secretName: message-processor-mtls
+  duration: 720h
+  renewBefore: 168h
+  commonName: message-processor.davtro02.svc
+  dnsNames:
+    - message-processor.davtro02.svc
+    - message-processor.davtro02.svc.cluster.local
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+    - server auth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spring-app-mtls
+  namespace: davtro02
+spec:
+  secretName: spring-app-mtls
+  duration: 720h
+  renewBefore: 168h
+  commonName: spring-app.davtro02.svc
+  dnsNames:
+    - spring-app.davtro02.svc
+    - spring-app.davtro02.svc.cluster.local
+    - spring-app-svc.davtro02.svc
+    - spring-app-svc.davtro02.svc.cluster.local
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+    - server auth
+---
+# PKCS12 password secret for fastapi-mtls
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fastapi-mtls-pkcs12
+  namespace: davtro02
+type: Opaque
+stringData:
+  password: changeme-in-production

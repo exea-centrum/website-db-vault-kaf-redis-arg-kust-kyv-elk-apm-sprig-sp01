@@ -32,6 +32,25 @@ data:
     path "database/creds/davtro-app-rw" { capabilities = ["read"] }
   davtro-snapshot.hcl: |
     path "sys/raft/snapshot" { capabilities = ["sudo", "read"] }
+  # KROK 6 (Transit): szyfrowanie danych aplikacyjnych (DEK/KEK).
+  # Aplikacje szyfrują wrażliwe dane (PII, numery telefonów, e-maile) przed zapisem do bazy.
+  # Vault zarządza kluczami szyfrującymi (KEK), aplikacje trzymają DEK w pamięci.
+  davtro-transit.hcl: |
+    path "transit/encrypt/davtro-app" { capabilities = ["update"] }
+    path "transit/decrypt/davtro-app" { capabilities = ["update"] }
+    path "transit/rewrap/davtro-app" { capabilities = ["update"] }
+    path "transit/datakey/davtro-app" { capabilities = ["update"] }
+    path "davtro/data/*" { capabilities = ["read"] }
+    path "database/creds/davtro-app-rw" { capabilities = ["read"] }
+  # KROK 6 (mTLS): certyfikaty klienta dla usług wewnętrznych.
+  # Usługi wzajemnie się autoryzują po TLS (mTLS) - wymagany cert client-cert.
+  davtro-mtls.hcl: |
+    path "pki/issue/davtro-internal" { capabilities = ["create", "update"] }
+    path "davtro/data/*" { capabilities = ["read"] }
+    path "database/creds/davtro-app-rw" { capabilities = ["read"] }
+    path "transit/encrypt/davtro-app" { capabilities = ["update"] }
+    path "transit/decrypt/davtro-app" { capabilities = ["update"] }
+    path "transit/datakey/davtro-app" { capabilities = ["update"] }
   # KROK 5 (PKI): CA davtro-internal + role certyfikatow.
   # cert-manager (ClusterIssuer/vault-issuer, rola auth: cert-manager)
   # podpisuje przez nie certy ingress + wewnetrzne.
@@ -272,7 +291,32 @@ spec:
                   bound_service_account_names="cert-manager,cert-manager-vault" \
                   bound_service_account_namespaces="cert-manager" \
                   policies=pki-issuer ttl=1h >/dev/null
-                log "DONE - Vault skonfigurowany"
+                # --- KROK 6 (Transit): silnik szyfrowania danych aplikacyjnych.
+                # Aplikacje szyfrują wrażliwe dane (PII, telefony, e-maile) przed zapisem.
+                # Vault zarządza KEK (Key Encryption Key), aplikacje trzymają DEK w pamięci.
+                if ! vault secrets list 2>/dev/null | grep -q '^transit/'; then
+                  log "Transit: wlaczam silnik transit"
+                  vault secrets enable transit >/dev/null
+                fi
+                if ! vault read transit/keys/davtro-app >/dev/null 2>&1; then
+                  log "Transit: tworze klucz szyfrujacy davtro-app"
+                  vault write -f transit/keys/davtro-app \
+                    type=aes256-gcm96 \
+                    auto_rotate_period=720h >/dev/null  # auto-rotacja co 30 dni
+                fi
+                vault policy write davtro-transit /sql/davtro-transit.hcl >/dev/null
+                vault write auth/kubernetes/role/davtro-transit \
+                  bound_service_account_names=davtro-sa \
+                  bound_service_account_namespaces=davtro02 \
+                  policies=davtro-transit ttl=1h >/dev/null
+                # --- KROK 6 (mTLS): certyfikaty klienta dla usług wewnętrznych.
+                # Usługi wzajemnie się autoryzują po TLS (mTLS) - wymagany cert client-cert.
+                vault policy write davtro-mtls /sql/davtro-mtls.hcl >/dev/null
+                vault write auth/kubernetes/role/davtro-mtls \
+                  bound_service_account_names=davtro-sa \
+                  bound_service_account_namespaces=davtro02 \
+                  policies=davtro-mtls ttl=1h >/dev/null
+                log "DONE - Vault skonfigurowany (Transit + mTLS aktywne)"
                 return 0
               }
 
