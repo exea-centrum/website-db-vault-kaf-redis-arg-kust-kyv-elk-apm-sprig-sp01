@@ -27,7 +27,10 @@ metadata:
 spec:
   vault:
     server: http://vault.davtro02.svc.cluster.local:8200
-    path: pki/issue/davtro-internal
+    # UWAGA: cert-manager wysyla CSR, wiec endpoint MUSI byc pki/sign (podpisuje
+    # CSR). pki/issue ignoruje CSR i generuje WLASNY klucz -> cert-manager
+    # odrzuca cert ("public key does not match the CSR", InvalidCertificate).
+    path: pki/sign/davtro-internal
     auth:
       tokenSecretRef:
         name: cert-manager-vault-token
