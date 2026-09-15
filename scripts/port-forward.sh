@@ -27,26 +27,27 @@ fi
 
 echo "Port-forwarding uslug DavTro na $ADDR ... (kubectl: $KC)"
 
-#              local:target-branch   |  usluga / opis
+# ---------------------------------------------------------
+# HTTP (zwykly plain-text, np. local dev / debug)
 # ---------------------------------------------------------
 #   FastAPI     8082 -> fastapi-web-app-svc:80      | REST API (/api/health)
 #   Frontend    8083 -> frontend-svc:80             | strona WWW (nginx non-root)
-#   Grafana     3000 -> grafana:3000                | dashboards
-#   Kafka UI    8081 -> kafka-ui:80                 | konsola Kafka
-#   Loki        3100 -> loki:3100                   | logi
-#   Tempo       3200 -> tempo:3200                  | trace'e (APM)
-#   Prometheus  9090 -> prometheus:9090             | metryki
-#   pgAdmin     5050 -> pgadmin:80                  | PostgreSQL UI
-#   PostgreSQL  5432 -> postgres-clusterip:5432     | baza danych
-#   Redis       6379 -> redis:6379                  | cache
-#   Vault       8200 -> vault:8200                  | sekrety
 #   Spring      8084 -> spring-app-svc:80           | Spring Boot
 #   Spark UI    8085 -> spark-master-svc:8082       | Spark dashboard
-#   Spark       7077 -> spark-master-svc:7077       | Spark protocol
-#   Kafka       9092 -> kafka-kraft:9092            | broker Kafka
-#   Kafka Exp   9308 -> kafka-exporter:9308         | metryki Kafka
-#   PG Exp      9187 -> postgres-exporter:9187      | metryki Postgres
-#   Node Exp    9101 -> node-exporter:9100          | metryki Node (9100 lokalnie zajete przez node_exporter na hoscie)
+#   Grafana     3000 -> grafana:3000
+#   Kafka UI    8081 -> kafka-ui:80
+#   Loki        3100 -> loki:3100
+#   Tempo       3200 -> tempo:3200
+#   Prometheus  9090 -> prometheus:9090
+#   pgAdmin     5050 -> pgadmin:80
+#   PostgreSQL  5432 -> postgres-clusterip:5432
+#   Redis       6379 -> redis:6379
+#   Vault       8200 -> vault:8200
+#   Spark       7077 -> spark-master-svc:7077
+#   Kafka       9092 -> kafka-kraft:9092
+#   Kafka Exp   9308 -> kafka-exporter:9308
+#   PG Exp      9187 -> postgres-exporter:9187
+#   Node Exp    9101 -> node-exporter:9100
 # ---------------------------------------------------------
 
 start() {
@@ -55,8 +56,73 @@ start() {
   echo "  $NAME: http://<IP>:${LOCAL}/  -> $SVC:$TARGET"
 }
 
+# ---------------------------------------------------------
+# HTTPS (TLS, np. przez Ingress, cert-manager + Vault PKI)
+# ---------------------------------------------------------
+# Dla uslug, ktore mają TLS w Ingress (davtro-ingress, spark-ingress).
+# Porty 443 w Ingressach sa przypisane doSecretow davtro-tls / spark-tls.
+# Przy port-forward do Ingressa forwardujemy 443 -> 443, dziekujace TLS termination.
+#
+# UWAGA: Samo "kubectl port-forward svc/davtro-ingress 8443:443" dziala, ale:
+#   - lokalny browser moze wymusizacjie certyfikat self-signed (davtro-tls).
+#   - certyfikaty sa generowane przez cert-manager z Vault PKI (pki/sign/davtro-ingress).
+# ---------------------------------------------------------
+
+start_https_ingress() {
+  local NAME="$1" LOCAL="$2" INGRESS="$3"
+  $KC port-forward --address "$ADDR" -n davtro02 "svc/$INGRESS" "$LOCAL:443" >"/tmp/pf-$NAME.log" 2>&1 &
+  echo "  $NAME: https://<IP>:${LOCAL}/  -> $INGRESS:443 (TLS termination na Ingress)"
+}
+
+# ---------------------------------------------------------
+# mTLS / client-cert dostep
+# ---------------------------------------------------------
+# Usługi fastapi-web-app, spring-app mają certyfikaty client-cert w Secretach:
+#   fastapi-mtls, spring-app-mtls (typ kubernetes.io/tls: tls.crt, tls.key, ca.crt)
+#
+# Do testowania mTLS najwygodniej użyć curl z wolumenem YAML, np.:
+#   kubectl -n davtro02 run mtls-curl --image=curlimages/curl -it --rm --restart=Never -- \
+#     curl --cacert /etc/ssl/certs/ca.crt \
+#          --cert /etc/ssl/certs/tls.crt \
+#          --key  /etc/ssl/certs/tls.key \
+#          https://fastapi-web-app.davtro02.svc
+#
+# Alternatywnie: port-forward do svc + curl lokalnie z wyodrebnionymi certyfikatami:
+#   kubectl -n davtro02 get secret fastapi-mtls -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/fastapi.crt
+#   kubectl -n davtro02 get secret fastapi-mtls -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/fastapi.key
+#   kubectl -n davtro02 get secret fastapi-mtls -o jsonpath='{.data.ca\.crt}'   | base64 -d > /tmp/fastapi-ca.crt
+#   curl --cacert /tmp/fastapi-ca.crt --cert /tmp/fastapi.crt --key /tmp/fastapi.key \
+#        https://localhost:8443/api/health
+# ---------------------------------------------------------
+
+start_fastapi_https() {
+  # Forward do fastapi-web-app-svc:443 jeśli usługa wystawia HTTPS (np. przez sidecar/grpc-tls).
+  # W domyslnym ukladzie fastapi-web-app słucha HTTP (port 80) i TLS jest tylko na Ingress.
+  # W razie future-proof: dzieki opcji HTTPS w aplikacji, forwardujemy do svc:443 lub 8443.
+  local LOCAL="$1"
+  start fastapi-https "$LOCAL" fastapi-web-app-svc 443
+}
+
+start_spring_https() {
+  local LOCAL="$1"
+  start spring-https "$LOCAL" spring-app-svc 443
+}
+
+start_vault_https() {
+  local LOCAL="$1"
+  # Vault może byc dostępny przez HTTPS, ale domyslnie jest plain HTTP na porcie 8200.
+  # W producji Vault często jest za proxy/TLS; w dev lokalnym forwardujemy 8200 (HTTP).
+  # Opcjonalnie: jeśli vault endpoint jest HTTPS, forwardujemy do 8200/TLS.
+  start vault-https "$LOCAL" vault 8200
+}
+
+echo
+
+echo "=== HTTP (plain) ==="
 start fastapi     8082 fastapi-web-app-svc 80
 start frontend    8083 frontend-svc        80
+start spring      8084 spring-app-svc      80
+start spark-ui    8085 spark-master-svc    8082
 start grafana     3000 grafana             3000
 start kafka-ui    8081 kafka-ui            80
 start loki        3100 loki                3100
@@ -66,8 +132,6 @@ start pgadmin     5050 pgadmin             80
 start postgres    5432 postgres-clusterip  5432
 start redis       6379 redis               6379
 start vault       8200 vault               8200
-start spring      8084 spring-app-svc      80
-start spark-ui    8085 spark-master-svc    8082
 start spark       7077 spark-master-svc    7077
 start kafka       9092 kafka-kraft         9092
 start kafka-exp   9308 kafka-exporter      9308
@@ -75,6 +139,26 @@ start pg-exp      9187 postgres-exporter   9187
 start node-exp    9101 node-exporter       9100
 
 echo
+
+echo "=== HTTPS (TLS przez Ingress) — opcjonalne, uruchamiaj ręcznie jeśli potrzebne ==="
+echo "# FastAPI-HTTPS przez davtro-ingress:"
+echo "#   $0 https-fastapi 8443   (uruchomi: $KC port-forward svc/davtro-ingress 8443:443)"
+echo "# Frontend-HTTPS przez davtro-ingress:"
+echo "#   $0 https-frontend 8444  (uruchomi: port-forward svc/davtro-ingress 8444:443)"
+echo "# Spring-HTTPS przez davtro-ingress:"
+echo "#   $0 https-spring 8445    (uruchomi: port-forward svc/davtro-ingress 8445:443)"
+echo "# Vault-HTTPS (jeśli Vault TLS włączony):"
+echo "#   $0 https-vault 8243     (uruchomi: port-forward svc/vault 8243:8200)"
+echo
+echo "=== mTLS / client-cert ==="
+echo "# Secrety TLS/mTLS w davtro02: fastapi-mtls, message-processor-mtls, spring-app-mtls"
+echo "# Do testów: wyodrebnij certyfikaty z Secretu i użyj curl --cert --key --cacert"
+echo "#   kubectl -n davtro02 get secret fastapi-mtls -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/fastapi.crt"
+echo "#   kubectl -n davtro02 get secret fastapi-mtls -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/fastapi.key"
+echo "#   kubectl -n davtro02 get secret fastapi-mtls -o jsonpath='{.data.ca\.crt}'   | base64 -d > /tmp/fastapi-ca.crt"
+echo "#   curl --cacert /tmp/fastapi-ca.crt --cert /tmp/fastapi.crt --key /tmp/fastapi.key https://localhost:8443/api/health"
+echo
+
 echo "ArgoCD UI:  https://<IP-HOSTA>:8080/   (port-forward osobno, port 8080 = ArgoCD)"
 echo "IP tego hosta w LAN: $(ip -4 addr show 2>/dev/null | awk '/inet / && $2 !~ /^127\./ {print $2}' | cut -d/ -f1 | head -1)"
 echo
