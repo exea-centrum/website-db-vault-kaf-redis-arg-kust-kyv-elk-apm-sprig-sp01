@@ -825,6 +825,8 @@ spec:
 | Zasób | Mechanizm rotacji | Lokalizacja | Częstotliwość |
 |-------|-------------------|-------------|---------------|
 | **Certyfikaty TLS** (davtro-tls, spark-tls) | cert-manager odnawia automatycznie `renewBefore: 360h (15d)` przed expiry | Secret: `davtro-tls`, `spark-tls` (ns davtro02) | Co 90 dni (auto) |
+| **Certyfikaty mTLS** (fastapi-mtls, message-processor-mtls, spring-app-mtls) | cert-manager odnawia automatycznie `renewBefore: 168h (7d)` przed expiry | Secret: `fastapi-mtls`, `message-processor-mtls`, `spring-app-mtls` (ns davtro02) | Co 30 dni (auto) |
+| **Vault PKI Root CA** | Brak auto-rotacji (10 lat TTL). Rotacja ręczna: nowy CA + re-sign wszystkich certów | Vault PKI engine | Ręcznie (rocznie) |
 | **Vault PKI Root CA** | Brak auto-rotacji (10 lat TTL). Rotacja ręczna: nowy CA + re-sign wszystkich certów | Vault PKI engine | Ręcznie (rocznie) |
 | **Dynamiczne credsy DB** | Vault database engine generuje nowe przy każdym request. Stare TTL 1h -> automatycznie wygasa | Secret: `fastapi-db-creds`, `message-processor-db-creds` (ns davtro02) | Co 30 min (ESO refresh) |
 | **KV sekrety** (davtro/db, davtro/smtp) | ESO synchronizuje z Vault. Ręczna zmiana w Vault -> ESO podłapie | Secret: `davtro-secrets` (ns davtro02) | Co 1h (ESO refresh) |
@@ -849,6 +851,9 @@ PRZECHOWYWANIE SEKRETÓW
    message-processor-db-creds: username, password (dynamiczne)
    davtro-tls: tls.crt, tls.key (auto-rotowane)
    spark-tls: tls.crt, tls.key (auto-rotowane)
+   fastapi-mtls: tls.crt, tls.key (auto-rotowane, client/server auth)
+   message-processor-mtls: tls.crt, tls.key (auto-rotowane, client/server auth)
+   spring-app-mtls: tls.crt, tls.key (auto-rotowane, client/server auth)
 
   KUBERNETES SECRETS (namespace: cert-manager)
    cert-manager-vault-token: token (Vault auth dla cert-manager)
@@ -867,6 +872,12 @@ CERTYFIKATY:
 
 CLUSTERISSUER:
   vault-issuer: Ready=True (token auth)
+  vault-issuer-internal: Ready=True (token auth, path pki/sign/davtro-internal)
+
+CERTYFIKATY mTLS (issuer: vault-issuer-internal):
+  fastapi-mtls:            Ready=True, CN=fastapi-web-app.davtro02.svc,    Issuer=vault-issuer-internal, Expiry=2026-10-14
+  message-processor-mtls:  Ready=True, CN=message-processor.davtro02.svc,  Issuer=vault-issuer-internal, Expiry=2026-10-14
+  spring-app-mtls:         Ready=True, CN=spring-app.davtro02.svc,         Issuer=vault-issuer-internal, Expiry=2026-10-14
 
 ARGODCD:
   davtro-website: SYNC=Synced, HEALTH=Healthy
