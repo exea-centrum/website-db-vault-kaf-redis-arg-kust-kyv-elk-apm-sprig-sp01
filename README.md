@@ -1,4 +1,4 @@
-# Davtro Apartments – platforma wynajmu krótkoterminowego
+# Davtro Apartments – platforma wynajmu krótkoterminowego (Full Open Source)
 
 Repo: `website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01`
 Namespace docelowy: `davtro`
