@@ -888,6 +888,73 @@ PODY (23 Running, 0 Errors):
   vault-0, vault-bootstrap
   spark-master, spark-worker (2)
   prometheus, grafana, loki, tempo, promtail
-  postgres-exporter, kafka-exporter, node-exporter
+    postgres-exporter, kafka-exporter, node-exporter
   pgadmin
 ```
+
+### 9.14 Szyfrowanie PII — Vault Transit Engine (Krok 4)
+
+**Stan:** ✅ Aktywne. Wrażliwe dane osobowe (imię gościa, e-mail, telefon) są
+szyfrowane **w locie** w Vault Transit Engine (klucz `davtro-app`, `aes256-gcm96`,
+auto-rotacja co 30 dni) przed zapisem do PostgreSQL, a odszyfrowywane przy odczycie.
+
+**Artykuły w repo:**
+- `backend-fastapi/app/transit_client.py` — klient Python (Kubernetes auth → Vault,
+  token odswieżany po 403/TTL, retry po wygaśnięciu).
+- `backend-fastapi/requirements.txt` — `requests==2.32.3` (klient HTTP do Transit).
+- `manifests/base/transit-helpers.yaml` — ConfigMap `transit-helpers` (skrypty
+  `transit_encrypt`/`transit_decrypt`/`transit_datakey` + `vault_agent_config.hcl`)
+  oraz `SecretStore vault-transit`.
+- `manifests/base/vault-bootstrap.yaml` — konfiguruje Vault: `vault secrets enable
+  transit`, klucz `davtro-app`, politykę `davtro-transit` i K8s-rolę `davtro-transit`
+  (SA `davtro-sa`, TTL 1h).
+
+**Jak szyfruje w FastAPI (`backend-fastapi/app/main.py`):**
+- w `create_booking()` przed `INSERT INTO bookings` pola `guest_name`, `email`,
+  `phone` przechodzą przez `encrypt_pii()` → w bazie zapisywane jako `vault:v1:...`
+  (ciphertext). Kafka i Redis dalej dostają plaintext — `message-processor`
+  wysyła z nich e-maile potwierdzające i faktury.
+- w `get_bookings()` pola `guest_name`, `email` są deszyfrowane przez `decrypt_pii()`
+  (stare wiersze w plaintextie zwracane bez zmian — recognizowane po braku prefiksu
+  `vault:v`).
+
+**Env w deploymentie (`deployment.yaml`):**
+| Env | Wartość |
+|---|---|
+| `VAULT_TRANSIT_ADDR` | `http://vault.davtro02.svc.cluster.local:8200` |
+| `VAULT_TRANSIT_KEY` | `davtro-app` |
+| `VAULT_TRANSIT_AUTH_ROLE` | `davtro-transit` |
+| `VAULT_TRANSIT_ENABLED` | `true` (można wyłączyć, by zapisywać plaintext) |
+
+**Fail-safe:** gdy Vault lub auth jest chwilowo niedostępny (startup, rotacja tokena,
+awaria), aplikacja **loguje błąd i zapisuje odczytane/zapisywane dane jako plaintext**
+— API nie przestaje działać. Dzięki temu nie ma ryzyka, że awaria sejfu zerwie
+rezerwacje. Szyfrowanie wznawia się automatycznie po przywróceniu łączności.
+
+**Polityka Vault (`davtro-transit.hcl`):**
+```
+path "transit/encrypt/davtro-app" { capabilities = ["update"] }
+path "transit/decrypt/davtro-app" { capabilities = ["update"] }
+path "transit/rewrap/davtro-app"  { capabilities = ["update"] }
+path "transit/datakey/davtro-app" { capabilities = ["update"] }
+path "davtro/data/*"              { capabilities = ["read"] }
+path "database/creds/davtro-app-rw" { capabilities = ["read"] }
+```
+
+**Weryfikacja po wdrożeniu:**
+```bash
+# healthcheck pokaże "transit": true
+kubectl -n davtro02 port-forward svc/fastapi-web-app 8080
+curl -s http://localhost:8080/api/health
+
+# utwórz rezerwację...
+curl -X POST http://localhost:8080/api/bookings \
+  -H 'Content-Type: application/json' \
+  -d '{"property_id":1,"guest_name":"Jan Kowalski","email":"jk@example.com","phone":"+48123456789","guests":2,"check_in":"2026-01-01","check_out":"2026-01-05","total_price":1000}'
+
+# ...i sprawdź, że w DB email jest zaszyfrowany (vault:v1:...), a nie plaintext:
+kubectl -n davtro02 exec postgres-db-0 -- psql -U davtro -d davtro_rentals -c \
+  'SELECT id, guest_name, email, phone FROM bookings LIMIT 1;'
+```
+Po poprawnym wdrożeniu `email` powinno zaczynać się od `vault:v1:` — a w odpowiedzi
+`GET /api/bookings` ponownie będzie to czytelny adres e-mail.
