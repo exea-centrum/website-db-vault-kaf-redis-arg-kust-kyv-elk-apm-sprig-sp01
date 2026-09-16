@@ -11,6 +11,24 @@ from datetime import datetime, date
 from kafka import KafkaProducer
 import uvicorn
 
+# KROK 4 (Transit PII): szyfrowanie danych wrazliwych (imie, e-mail, telefon)
+# przez Vault Transit Engine (key davtro-app). Fail-safe: gdy Vault/Transit sa
+# chwilowo niedostepne, logujemy blad i zapisujemy plaintext - API nie pada.
+try:
+    from .transit_client import decrypt as transit_decrypt
+    from .transit_client import encrypt as transit_encrypt
+
+    _TRANSIT_IMPORTED = True
+except Exception as _transit_exc:  # pragma: no cover - brak modulu/wersji
+    transit_encrypt = None
+    transit_decrypt = None
+    _TRANSIT_IMPORTED = False
+    print("transit_client niedostepny:", _transit_exc)
+
+TRANSIT_ENABLED = os.getenv("VAULT_TRANSIT_ENABLED", "true").lower() in ("1", "true", "yes")
+# Ciphertext Vault Transit ma prefiks "vault:vN:" - po nim rozpoznajemy zaszyfrowane pole.
+_TRANSIT_PREFIX = "vault:v"
+
 app = FastAPI(title="DavTro Rentals API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -24,6 +42,35 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka-kraft:9092")
 
 db_pool = None
+
+
+def transit_ready():
+    """Czy szyfrowanie PII przez Vault Transit jest aktywne."""
+    return _TRANSIT_IMPORTED and TRANSIT_ENABLED
+
+
+def encrypt_pii(value):
+    """Szyfruje PII przed zapisem do bazy. Fallback: zwraca plaintext."""
+    if value is None or not transit_ready():
+        return value
+    try:
+        return transit_encrypt(str(value))
+    except Exception as exc:
+        print("encrypt_pii error:", exc)
+        return value
+
+
+def decrypt_pii(value):
+    """Deszyfruje PII przy odczycie. Plaintext (stare wiersze) zwraca bez zmian."""
+    if not isinstance(value, str) or not value.startswith(_TRANSIT_PREFIX):
+        return value
+    if not transit_ready():
+        return value
+    try:
+        return transit_decrypt(value)
+    except Exception as exc:
+        print("decrypt_pii error:", exc)
+        return value
 
 
 def _read_creds_file(path):
@@ -132,7 +179,7 @@ async def health():
     redis_ok = await redis_pool.ping()
     async with db_pool.acquire() as conn:
         db_ok = await conn.fetchval("SELECT 1")
-    return {"status": "healthy", "database": db_ok == 1, "redis": redis_ok, "kafka": kafka_producer is not None}
+    return {"status": "healthy", "database": db_ok == 1, "redis": redis_ok, "kafka": kafka_producer is not None, "transit": transit_ready()}
 
 @app.get("/api/properties")
 async def get_properties():
@@ -152,6 +199,20 @@ async def create_booking(booking: BookingCreate, background_tasks: BackgroundTas
     cache_key = f"booking:{booking_id}"
     booking_data = booking.dict()
     booking_data.update({"id": booking_id, "nights": nights, "status": "pending"})
+    # KROK 4 (Transit PII): dane osobowe (imie, e-mail, telefon) zapisujemy do
+    # PostgreSQL zaszyfrowane kluczem Vault Transit (key davtro-app). Kafka i Redis
+    # dostaja plaintext, bo message-processor wysyla z niego e-maile.
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO bookings (id, property_id, guest_name, email, phone, guests,
+                   check_in, check_out, nights, total_price, status)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               ON CONFLICT (id) DO NOTHING""",
+            booking_id, booking.property_id,
+            encrypt_pii(booking.guest_name), encrypt_pii(booking.email), encrypt_pii(booking.phone),
+            booking.guests, booking.check_in, booking.check_out, nights,
+            booking.total_price, "pending",
+        )
     await redis_pool.setex(cache_key, 3600, json.dumps(booking_data))
     kafka_producer.send("bookings-created", {"event": "booking_created", "booking_id": booking_id, "property_id": booking.property_id, "guest_name": booking.guest_name, "email": booking.email, "phone": booking.phone, "check_in": str(booking.check_in), "check_out": str(booking.check_out), "nights": nights, "total_price": float(booking.total_price), "timestamp": datetime.now().isoformat()})
     kafka_producer.send("email-invoices", {"event": "invoice_request", "booking_id": booking_id, "email": booking.email, "guest_name": booking.guest_name, "total_price": float(booking.total_price), "property_id": booking.property_id, "check_in": str(booking.check_in), "check_out": str(booking.check_out)})
@@ -163,7 +224,7 @@ async def create_booking(booking: BookingCreate, background_tasks: BackgroundTas
 async def get_bookings():
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT b.*, p.name as property_name FROM bookings b JOIN properties p ON b.property_id = p.id ORDER BY b.created_at DESC")
-    return [BookingResponse(id=r["id"], property_id=r["property_id"], property_name=r["property_name"], guest_name=r["guest_name"], email=r["email"], check_in=str(r["check_in"]), check_out=str(r["check_out"]), total_price=float(r["total_price"]), status=r["status"], created_at=str(r["created_at"])) for r in rows]
+    return [BookingResponse(id=r["id"], property_id=r["property_id"], property_name=r["property_name"], guest_name=decrypt_pii(r["guest_name"]), email=decrypt_pii(r["email"]), check_in=str(r["check_in"]), check_out=str(r["check_out"]), total_price=float(r["total_price"]), status=r["status"], created_at=str(r["created_at"])) for r in rows]
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
