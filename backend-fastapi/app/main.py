@@ -166,7 +166,13 @@ async def init_db():
         # KROK 4 (Transit PII) FIX: szyfrogram Vault Transit ("vault:v1:...") ma ~65-90 znakow,
         # a kolumna phone byla VARCHAR(50) -> kazdy INSERT padal z StringDataRightTruncation.
         # Idempotentna migracja baz utworzonych starsza wersja kodu (no-op, gdy juz 255).
-        await conn.execute("ALTER TABLE bookings ALTER COLUMN phone TYPE VARCHAR(255)")
+        # ALTER wymaga wlasnosci tabeli, a API laczy sie dynamicznymi credsami z Vaulta
+        # (davtro-app-rw: SELECT/INSERT/UPDATE/DELETE, bez ALTER) - dlatego best-effort:
+        # brak uprawnien logujemy i dzialamy dalej (swieza baza ma VARCHAR(255) w DDL).
+        try:
+            await conn.execute("ALTER TABLE bookings ALTER COLUMN phone TYPE VARCHAR(255)")
+        except Exception as exc:
+            print("init_db: pomijam ALTER bookings.phone (brak wlasnosci tabeli):", exc)
         count = await conn.fetchval("SELECT COUNT(*) FROM properties")
         if count == 0:
             await conn.execute("""INSERT INTO properties (id, name, location, price, guests, description, amenities) VALUES
