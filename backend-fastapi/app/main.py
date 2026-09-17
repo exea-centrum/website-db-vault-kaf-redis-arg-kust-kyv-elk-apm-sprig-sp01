@@ -162,7 +162,11 @@ async def shutdown():
 async def init_db():
     async with db_pool.acquire() as conn:
         await conn.execute('CREATE TABLE IF NOT EXISTS properties (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, location VARCHAR(100), price DECIMAL(10,2), guests INT DEFAULT 2, description TEXT, amenities JSONB DEFAULT \'[]\', created_at TIMESTAMP DEFAULT NOW())')
-        await conn.execute('CREATE TABLE IF NOT EXISTS bookings (id VARCHAR(50) PRIMARY KEY, property_id INT REFERENCES properties(id), guest_name VARCHAR(255), email VARCHAR(255), phone VARCHAR(50), guests INT, check_in DATE, check_out DATE, nights INT, total_price DECIMAL(10,2), status VARCHAR(50) DEFAULT \'confirmed\', pipeline VARCHAR(100) DEFAULT \'Redis -> Kafka -> PostgreSQL\', created_at TIMESTAMP DEFAULT NOW())')
+        await conn.execute('CREATE TABLE IF NOT EXISTS bookings (id VARCHAR(50) PRIMARY KEY, property_id INT REFERENCES properties(id), guest_name VARCHAR(255), email VARCHAR(255), phone VARCHAR(255), guests INT, check_in DATE, check_out DATE, nights INT, total_price DECIMAL(10,2), status VARCHAR(50) DEFAULT \'confirmed\', pipeline VARCHAR(100) DEFAULT \'Redis -> Kafka -> PostgreSQL\', created_at TIMESTAMP DEFAULT NOW())')
+        # KROK 4 (Transit PII) FIX: szyfrogram Vault Transit ("vault:v1:...") ma ~65-90 znakow,
+        # a kolumna phone byla VARCHAR(50) -> kazdy INSERT padal z StringDataRightTruncation.
+        # Idempotentna migracja baz utworzonych starsza wersja kodu (no-op, gdy juz 255).
+        await conn.execute("ALTER TABLE bookings ALTER COLUMN phone TYPE VARCHAR(255)")
         count = await conn.fetchval("SELECT COUNT(*) FROM properties")
         if count == 0:
             await conn.execute("""INSERT INTO properties (id, name, location, price, guests, description, amenities) VALUES
@@ -197,7 +201,11 @@ async def create_booking(booking: BookingCreate, background_tasks: BackgroundTas
     booking_id = f"BK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{booking.property_id}"
     nights = (booking.check_out - booking.check_in).days
     cache_key = f"booking:{booking_id}"
-    booking_data = booking.dict()
+    # FIX: booking.dict() zostawial obiekty datetime.date, na ktorych json.dumps()
+    # rzucal TypeError ("Object of type date is not JSON serializable") -> 500.
+    # model_dump(mode="json") konwertuje date na ISO-8601 (str), wiec SETEX do Redisa
+    # i events do Kafki przechodza bez zmian w przeplywie.
+    booking_data = booking.model_dump(mode="json")
     booking_data.update({"id": booking_id, "nights": nights, "status": "pending"})
     # KROK 4 (Transit PII): dane osobowe (imie, e-mail, telefon) zapisujemy do
     # PostgreSQL zaszyfrowane kluczem Vault Transit (key davtro-app). Kafka i Redis
