@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
@@ -10,6 +10,9 @@ import os
 from datetime import datetime, date
 from kafka import KafkaProducer
 import uvicorn
+
+# KROK 5 (Auth): logowanie rezerwujacych - PBKDF2 (stdlib), sesje w Redis.
+from .auth import hash_password, verify_password, new_session_token, SESSION_TTL_SECONDS
 
 # KROK 4 (Transit PII): szyfrowanie danych wrazliwych (imie, e-mail, telefon)
 # przez Vault Transit Engine (key davtro-app). Fail-safe: gdy Vault/Transit sa
@@ -135,13 +138,32 @@ class BookingResponse(BaseModel):
     id: str
     property_id: int
     property_name: str
-    guest_name: str
-    email: str
+    guest_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
     check_in: str
     check_out: str
-    total_price: float
+    total_price: Optional[float] = None
     status: str
     created_at: str
+    # KROK 5 (Auth): masked=True -> dane gościa (imie/email/telefon/cena) ukryte,
+    # bo widz jest zalogowany jako inny uzytkownik (albo niezalogowany).
+    masked: bool = False
+
+class AuthUser(BaseModel):
+    id: int
+    username: str
+    role: str
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+class RegisterRequest(AuthRequest):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
 
 @app.on_event("startup")
 async def startup():
@@ -173,6 +195,19 @@ async def init_db():
             await conn.execute("ALTER TABLE bookings ALTER COLUMN phone TYPE VARCHAR(255)")
         except Exception as exc:
             print("init_db: pomijam ALTER bookings.phone (brak wlasnosci tabeli):", exc)
+        # KROK 5 (Auth): konta rezerwujacych + powiazanie rezerwacji z kontem
+        # (user_id/username), zeby jeden rezerwujacy nie widzial danych drugiego.
+        await conn.execute("""CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL, role VARCHAR(20) NOT NULL DEFAULT 'user',
+            full_name VARCHAR(255), email VARCHAR(255),
+            created_at TIMESTAMP DEFAULT NOW())""")
+        for ddl in ("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS user_id INT",
+                    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS username VARCHAR(100)"):
+            try:
+                await conn.execute(ddl)
+            except Exception as exc:
+                print("init_db: pomijam", ddl, ":", exc)
         count = await conn.fetchval("SELECT COUNT(*) FROM properties")
         if count == 0:
             await conn.execute("""INSERT INTO properties (id, name, location, price, guests, description, amenities) VALUES
@@ -183,6 +218,14 @@ async def init_db():
                 (5, 'Penthouse View - Warszawa', 'warsaw', 850, 4, 'Ekskluzywny penthouse', '["WiFi","Basen","Silownia","Concierge"]'),
                 (6, 'Apartament Royal - Krakow', 'krakow', 390, 4, 'Elegancki apartament w Kazimierzu', '["WiFi","Klimatyzacja","Balkon"]')
                 ON CONFLICT DO NOTHING""")
+        # KROK 5 (Auth): konto administratora (widzi wszystkie dane gości).
+        admin_user = os.getenv("ADMIN_USERNAME", "admin")
+        admin_pass = os.getenv("ADMIN_PASSWORD", "admin123")
+        if await conn.fetchval("SELECT COUNT(*) FROM users") == 0:
+            await conn.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'admin') ON CONFLICT (username) DO NOTHING",
+                admin_user, hash_password(admin_pass))
+            print(f"init_db: utworzono konto admina '{admin_user}' (haslo z ADMIN_PASSWORD / domyslne)")
 
 @app.get("/api/health")
 async def health():
@@ -202,8 +245,114 @@ async def get_properties():
     await redis_pool.setex(cache_key, 300, json.dumps(properties))
     return properties
 
+# KROK 5 (Auth): sesje trzymane w Redis (session:<token>, TTL 24h).
+SESSION_KEY_PREFIX = "session:"
+
+
+async def get_current_user(request: Request) -> Optional[AuthUser]:
+    """Odczytuje usera z naglowka Authorization: Bearer <token> (Redis)."""
+    auth_header = request.headers.get("authorization") or ""
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header[7:].strip()
+    if not token:
+        return None
+    raw = await redis_pool.get(SESSION_KEY_PREFIX + token)
+    if not raw:
+        return None
+    data = json.loads(raw)
+    return AuthUser(id=data["id"], username=data["username"], role=data["role"],
+                    full_name=data.get("full_name"), email=data.get("email"))
+
+
+async def require_user(request: Request) -> AuthUser:
+    """Rezerwacja wymaga zalogowania (KROK 5)."""
+    user = await get_current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Wymagane zalogowanie")
+    return user
+
+
+def is_admin(user: Optional[AuthUser]) -> bool:
+    return user is not None and user.role == "admin"
+
+
+def owns_booking(user: Optional[AuthUser], row_user_id) -> bool:
+    """Wlasciciel rezerwacji (albo admin) widzi pelne dane; inni - tylko maske."""
+    if user is None:
+        return False
+    if user.role == "admin":
+        return True
+    return row_user_id is not None and int(row_user_id) == int(user.id)
+
+# Wartosci zwracane dla "obcych" rezerwacji - dane gościa sa zastrzezone.
+MASKED_GUEST_NAME = "Zastrzeżone (dane gościa ukryte)"
+
+
+@app.post("/api/auth/register")
+async def register_user(payload: RegisterRequest):
+    """Rejestracja rezerwujacego + natychmiastowy login (token do Redisa)."""
+    username = payload.username.strip()
+    if len(username) < 3 or len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Login min. 3 znaki, haslo min. 6 znakow")
+    full_name = encrypt_pii(payload.full_name) if payload.full_name else None
+    email = encrypt_pii(payload.email) if payload.email else None
+    async with db_pool.acquire() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM users WHERE username=$1", username)
+        if exists:
+            raise HTTPException(status_code=409, detail="Ten login jest juz zajety")
+        user_id = await conn.fetchval(
+            """INSERT INTO users (username, password_hash, role, full_name, email)
+               VALUES ($1,$2,'user',$3,$4) RETURNING id""",
+            username, hash_password(payload.password), full_name, email)
+    token = new_session_token()
+    await redis_pool.setex(SESSION_KEY_PREFIX + token, SESSION_TTL_SECONDS,
+                           json.dumps({"id": user_id, "username": username, "role": "user",
+                                       "full_name": decrypt_pii(full_name) if full_name else None,
+                                       "email": decrypt_pii(email) if email else None}))
+    return {"token": token, "user": AuthUser(id=user_id, username=username, role="user",
+                                             full_name=decrypt_pii(full_name) if full_name else None,
+                                             email=decrypt_pii(email) if email else None)}
+
+
+@app.post("/api/auth/login")
+async def login_user(payload: AuthRequest):
+    """Login/haslo -> token sesyjny w Redis (Authorization: Bearer)."""
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE username=$1", payload.username.strip())
+    if row is None or not verify_password(payload.password, row["password_hash"]):
+        raise HTTPException(status_code=401, detail="Nieprawidlowy login lub haslo")
+    full_name = decrypt_pii(row["full_name"]) if row["full_name"] else None
+    email = decrypt_pii(row["email"]) if row["email"] else None
+    token = new_session_token()
+    await redis_pool.setex(SESSION_KEY_PREFIX + token, SESSION_TTL_SECONDS,
+                           json.dumps({"id": row["id"], "username": row["username"],
+                                       "role": row["role"], "full_name": full_name, "email": email}))
+    return {"token": token, "user": AuthUser(id=row["id"], username=row["username"],
+                                             role=row["role"], full_name=full_name, email=email)}
+
+
+@app.post("/api/auth/logout")
+async def logout_user(request: Request):
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        await redis_pool.delete(SESSION_KEY_PREFIX + auth_header[7:].strip())
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def me(request: Request):
+    user = await get_current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Brak aktywnej sesji")
+    return user
+
+
 @app.post("/api/bookings")
-async def create_booking(booking: BookingCreate, background_tasks: BackgroundTasks):
+async def create_booking(booking: BookingCreate, background_tasks: BackgroundTasks, request: Request):
+    # KROK 5 (Auth): rezerwacja wymaga zalogowania - inaczej nie da sie ukryc
+    # danych gościa przed innymi rezerwujacymi.
+    user = await require_user(request)
     booking_id = f"BK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{booking.property_id}"
     nights = (booking.check_out - booking.check_in).days
     cache_key = f"booking:{booking_id}"
@@ -218,13 +367,13 @@ async def create_booking(booking: BookingCreate, background_tasks: BackgroundTas
     # dostaja plaintext, bo message-processor wysyla z niego e-maile.
     async with db_pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO bookings (id, property_id, guest_name, email, phone, guests,
+            """INSERT INTO bookings (id, property_id, guest_name, email, phone, guests, user_id, username,
                    check_in, check_out, nights, total_price, status)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                ON CONFLICT (id) DO NOTHING""",
             booking_id, booking.property_id,
             encrypt_pii(booking.guest_name), encrypt_pii(booking.email), encrypt_pii(booking.phone),
-            booking.guests, booking.check_in, booking.check_out, nights,
+            booking.guests, user.id, user.username, booking.check_in, booking.check_out, nights,
             booking.total_price, "pending",
         )
     await redis_pool.setex(cache_key, 3600, json.dumps(booking_data))
@@ -235,10 +384,33 @@ async def create_booking(booking: BookingCreate, background_tasks: BackgroundTas
     return BookingResponse(id=booking_id, property_id=booking.property_id, property_name="", guest_name=booking.guest_name, email=booking.email, check_in=str(booking.check_in), check_out=str(booking.check_out), total_price=booking.total_price, status="pending", created_at=datetime.now().isoformat())
 
 @app.get("/api/bookings")
-async def get_bookings():
+async def get_bookings(request: Request, property_id: Optional[int] = None):
+    """KROK 5 (Auth): wlasciciel rezerwacji i admin widza pelne dane gościa
+    (imie, email, telefon, kwote). Pozostali dostaja wiersz zamaskowany -
+    w kolach kalendarza daty zostaja, bo potrzebne do pokazania dostepnosci."""
+    user = await get_current_user(request)
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT b.*, p.name as property_name FROM bookings b JOIN properties p ON b.property_id = p.id ORDER BY b.created_at DESC")
-    return [BookingResponse(id=r["id"], property_id=r["property_id"], property_name=r["property_name"], guest_name=decrypt_pii(r["guest_name"]), email=decrypt_pii(r["email"]), check_in=str(r["check_in"]), check_out=str(r["check_out"]), total_price=float(r["total_price"]), status=r["status"], created_at=str(r["created_at"])) for r in rows]
+        rows = await conn.fetch(
+            "SELECT b.*, p.name as property_name FROM bookings b JOIN properties p ON b.property_id = p.id WHERE ($1::int IS NULL OR b.property_id = $1::int) ORDER BY b.created_at DESC",
+            property_id)
+    result = []
+    for r in rows:
+        if owns_booking(user, r["user_id"]):
+            result.append(BookingResponse(
+                id=r["id"], property_id=r["property_id"], property_name=r["property_name"],
+                guest_name=decrypt_pii(r["guest_name"]), email=decrypt_pii(r["email"]),
+                phone=decrypt_pii(r["phone"]) if r["phone"] else None,
+                check_in=str(r["check_in"]), check_out=str(r["check_out"]),
+                total_price=float(r["total_price"]), status=r["status"],
+                created_at=str(r["created_at"]), masked=False))
+        else:
+            result.append(BookingResponse(
+                id=r["id"], property_id=r["property_id"], property_name=r["property_name"],
+                guest_name=MASKED_GUEST_NAME, email=None, phone=None,
+                check_in=str(r["check_in"]), check_out=str(r["check_out"]),
+                total_price=None, status=r["status"],
+                created_at=str(r["created_at"]), masked=True))
+    return result
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
