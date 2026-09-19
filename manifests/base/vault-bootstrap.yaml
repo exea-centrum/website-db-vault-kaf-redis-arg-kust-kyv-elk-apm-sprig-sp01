@@ -212,6 +212,15 @@ spec:
                   log "wygenerowano DB_PASSWORD (KV davtro/db)"
                 fi
                 vault kv get davtro/smtp >/dev/null 2>&1 || vault kv put davtro/smtp SMTP_USER='' SMTP_PASSWORD=''
+                # KROK 5b (Auth): haslo admina panelu rezerwacji - GENEROWANE w Vault
+                # (KV davtro/auth), nigdy w repo. Jak DB_PASSWORD: gdy klucz istnieje,
+                # nie ruszamy go (to jedyna zrodlowa prawdy dla konta 'admin').
+                if ! vault kv get davtro/auth >/dev/null 2>&1; then
+                  ADMINPASS="$(head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 24)"
+                  [ -n "$ADMINPASS" ] || ADMINPASS="DavtroAdmin$(date +%s)x1"
+                  vault kv put davtro/auth ADMIN_PASSWORD="$ADMINPASS"
+                  log "wygenerowano ADMIN_PASSWORD (KV davtro/auth)"
+                fi
 
                 vault auth list 2>/dev/null | grep -q 'kubernetes/' || vault auth enable kubernetes
                 vault write auth/kubernetes/config \
