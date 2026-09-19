@@ -94,6 +94,16 @@ def db_creds():
     return user, password
 
 
+# KROK 5b (Auth): haslo admina NIE trzymamy w repo - idzie z Vaulta przez ESO
+# (KV secret/davtro/auth -> klucz ADMIN_PASSWORD w Secrecie davtro-secrets, ktory
+# deployment juz ma w envFrom) albo z pliku ADMIN_PASSWORD_FILE. Fallback "admin123"
+# tylko dla dev lokalnego bez klastrowego Vaulta.
+def admin_password():
+    file_path = os.getenv("ADMIN_PASSWORD_FILE")
+    from_file = _read_creds_file(file_path) if file_path else None
+    return from_file or os.getenv("ADMIN_PASSWORD") or "admin123"
+
+
 async def create_db_pool(user, password):
     return await asyncpg.create_pool(
         host=DB_HOST, port=DB_PORT, database=DB_NAME,
@@ -149,6 +159,8 @@ class BookingResponse(BaseModel):
     # KROK 5 (Auth): masked=True -> dane gościa (imie/email/telefon/cena) ukryte,
     # bo widz jest zalogowany jako inny uzytkownik (albo niezalogowany).
     masked: bool = False
+    # mine=True -> to rezerwacja zalogowanego uzytkownika (odznaka "Moja rezerwacja").
+    mine: bool = False
 
 class AuthUser(BaseModel):
     id: int
@@ -164,6 +176,14 @@ class AuthRequest(BaseModel):
 class RegisterRequest(AuthRequest):
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+class AdminSetPasswordRequest(BaseModel):
+    username: str
+    new_password: str
 
 @app.on_event("startup")
 async def startup():
@@ -234,7 +254,7 @@ async def init_db():
         # Seed per-username: dziala tez, gdy tabela users ma juz innych uzytkownikow
         # (np. po uruchomieniu starszej wersji aplikacji bez seeda admina).
         admin_user = os.getenv("ADMIN_USERNAME", "admin")
-        admin_pass = os.getenv("ADMIN_PASSWORD", "admin123")
+        admin_pass = admin_password()
         if await conn.fetchval("SELECT 1 FROM users WHERE username=$1", admin_user) is None:
             await conn.execute(
                 "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'admin') ON CONFLICT (username) DO NOTHING",
@@ -344,7 +364,7 @@ async def login_user(payload: AuthRequest):
             admin_user = payload.username.strip()
             await conn.execute(
                 "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'admin') ON CONFLICT (username) DO NOTHING",
-                admin_user, hash_password(os.getenv("ADMIN_PASSWORD", "admin123")))
+                admin_user, hash_password(admin_password()))
             print(f"login: bootstrap konta admina '{admin_user}' (brak konta przy logowaniu)")
             row = await conn.fetchrow("SELECT * FROM users WHERE username=$1", admin_user)
     if row is None or not verify_password(payload.password, row["password_hash"]):
@@ -373,6 +393,38 @@ async def me(request: Request):
     if user is None:
         raise HTTPException(status_code=401, detail="Brak aktywnej sesji")
     return user
+
+
+@app.post("/api/auth/change-password")
+async def change_password(payload: ChangePasswordRequest, request: Request):
+    """Zmiana wlasnego hasla - wymaga aktualnego hasla (KROK 5b)."""
+    user = await require_user(request)
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Nowe haslo musi miec min. 6 znakow")
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT password_hash FROM users WHERE id=$1", user.id)
+        if row is None or not verify_password(payload.current_password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Aktualne haslo jest nieprawidlowe")
+        await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2",
+                           hash_password(payload.new_password), user.id)
+    return {"ok": True, "message": "Haslo zmienione"}
+
+
+@app.post("/api/auth/admin/set-password")
+async def admin_set_password(payload: AdminSetPasswordRequest, request: Request):
+    """Tylko admin: reset hasla dowolnego uzytkownika (KROK 5b)."""
+    user = await require_user(request)
+    if not is_admin(user):
+        raise HTTPException(status_code=403, detail="Tylko administrator moze zmieniac cudze hasla")
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Nowe haslo musi miec min. 6 znakow")
+    async with db_pool.acquire() as conn:
+        found = await conn.fetchval("SELECT 1 FROM users WHERE username=$1", payload.username.strip())
+        if found is None:
+            raise HTTPException(status_code=404, detail="Nie ma takiego uzytkownika")
+        await conn.execute("UPDATE users SET password_hash=$1 WHERE username=$2",
+                           hash_password(payload.new_password), payload.username.strip())
+    return {"ok": True, "message": f"Haslo uzytkownika {payload.username.strip()} zostalo zmienione"}
 
 
 @app.post("/api/bookings")
@@ -437,6 +489,7 @@ async def get_bookings(request: Request, property_id: Optional[int] = None):
     result = []
     for r in rows:
         # .get() - kolumna user_id moze nie istniec w starszej tabeli bookings
+        is_own = user is not None and r.get("user_id") is not None and int(r.get("user_id")) == int(user.id)
         if owns_booking(user, r.get("user_id")):
             result.append(BookingResponse(
                 id=r["id"], property_id=r["property_id"], property_name=r["property_name"],
@@ -444,14 +497,14 @@ async def get_bookings(request: Request, property_id: Optional[int] = None):
                 phone=decrypt_pii(r["phone"]) if r["phone"] else None,
                 check_in=str(r["check_in"]), check_out=str(r["check_out"]),
                 total_price=float(r["total_price"]), status=r["status"],
-                created_at=str(r["created_at"]), masked=False))
+                created_at=str(r["created_at"]), masked=False, mine=is_own and user.role != "admin"))
         else:
             result.append(BookingResponse(
                 id=r["id"], property_id=r["property_id"], property_name=r["property_name"],
                 guest_name=MASKED_GUEST_NAME, email=None, phone=None,
                 check_in=str(r["check_in"]), check_out=str(r["check_out"]),
                 total_price=None, status=r["status"],
-                created_at=str(r["created_at"]), masked=True))
+                created_at=str(r["created_at"]), masked=True, mine=False))
     return result
 
 if __name__ == "__main__":
