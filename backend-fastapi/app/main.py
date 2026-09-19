@@ -393,16 +393,30 @@ async def create_booking(booking: BookingCreate, background_tasks: BackgroundTas
     # PostgreSQL zaszyfrowane kluczem Vault Transit (key davtro-app). Kafka i Redis
     # dostaja plaintext, bo message-processor wysyla z niego e-maile.
     async with db_pool.acquire() as conn:
-        await conn.execute(
-            """INSERT INTO bookings (id, property_id, guest_name, email, phone, guests, user_id, username,
-                   check_in, check_out, nights, total_price, status)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-               ON CONFLICT (id) DO NOTHING""",
-            booking_id, booking.property_id,
-            encrypt_pii(booking.guest_name), encrypt_pii(booking.email), encrypt_pii(booking.phone),
-            booking.guests, user.id, user.username, booking.check_in, booking.check_out, nights,
-            booking.total_price, "pending",
-        )
+        # KROK 5: powiazanie rezerwacji z kontem tylko gdy kolumny istnieja
+        # (gdy brak praw ALTER do tabeli zapisujemy bez user_id/username).
+        if BOOKINGS_HAS_USER_ID and BOOKINGS_HAS_USERNAME:
+            await conn.execute(
+                """INSERT INTO bookings (id, property_id, guest_name, email, phone, guests, user_id, username,
+                       check_in, check_out, nights, total_price, status)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                   ON CONFLICT (id) DO NOTHING""",
+                booking_id, booking.property_id,
+                encrypt_pii(booking.guest_name), encrypt_pii(booking.email), encrypt_pii(booking.phone),
+                booking.guests, user.id, user.username, booking.check_in, booking.check_out, nights,
+                booking.total_price, "pending",
+            )
+        else:
+            await conn.execute(
+                """INSERT INTO bookings (id, property_id, guest_name, email, phone, guests,
+                       check_in, check_out, nights, total_price, status)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                   ON CONFLICT (id) DO NOTHING""",
+                booking_id, booking.property_id,
+                encrypt_pii(booking.guest_name), encrypt_pii(booking.email), encrypt_pii(booking.phone),
+                booking.guests, booking.check_in, booking.check_out, nights,
+                booking.total_price, "pending",
+            )
     await redis_pool.setex(cache_key, 3600, json.dumps(booking_data))
     kafka_producer.send("bookings-created", {"event": "booking_created", "booking_id": booking_id, "property_id": booking.property_id, "guest_name": booking.guest_name, "email": booking.email, "phone": booking.phone, "check_in": str(booking.check_in), "check_out": str(booking.check_out), "nights": nights, "total_price": float(booking.total_price), "timestamp": datetime.now().isoformat()})
     kafka_producer.send("email-invoices", {"event": "invoice_request", "booking_id": booking_id, "email": booking.email, "guest_name": booking.guest_name, "total_price": float(booking.total_price), "property_id": booking.property_id, "check_in": str(booking.check_in), "check_out": str(booking.check_out)})
@@ -422,7 +436,8 @@ async def get_bookings(request: Request, property_id: Optional[int] = None):
             property_id)
     result = []
     for r in rows:
-        if owns_booking(user, r["user_id"]):
+        # .get() - kolumna user_id moze nie istniec w starszej tabeli bookings
+        if owns_booking(user, r.get("user_id")):
             result.append(BookingResponse(
                 id=r["id"], property_id=r["property_id"], property_name=r["property_name"],
                 guest_name=decrypt_pii(r["guest_name"]), email=decrypt_pii(r["email"]),
