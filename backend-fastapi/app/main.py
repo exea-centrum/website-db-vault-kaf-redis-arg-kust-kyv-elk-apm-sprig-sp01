@@ -12,7 +12,7 @@ from kafka import KafkaProducer
 import uvicorn
 
 # KROK 5 (Auth): logowanie rezerwujacych - PBKDF2 (stdlib), sesje w Redis.
-from .auth import hash_password, verify_password, new_session_token, SESSION_TTL_SECONDS
+from .auth import hash_password, verify_password, new_session_token, SESSION_TTL_SECONDS, generate_random_password
 
 # KROK 4 (Transit PII): szyfrowanie danych wrazliwych (imie, e-mail, telefon)
 # przez Vault Transit Engine (key davtro-app). Fail-safe: gdy Vault/Transit sa
@@ -94,14 +94,27 @@ def db_creds():
     return user, password
 
 
-# KROK 5b (Auth): haslo admina NIE trzymamy w repo - idzie z Vaulta przez ESO
-# (KV secret/davtro/auth -> klucz ADMIN_PASSWORD w Secrecie davtro-secrets, ktory
-# deployment juz ma w envFrom) albo z pliku ADMIN_PASSWORD_FILE. Fallback "admin123"
-# tylko dla dev lokalnego bez klastrowego Vaulta.
+# KROK 5b (Auth): haslo admina WYLACZNIE z Vaulta przez ESO (KV davtro/auth ->
+# klucz ADMIN_PASSWORD w Secrecie davtro-secrets, ktory deployment juz ma w envFrom)
+# albo z pliku ADMIN_PASSWORD_FILE. W repo NIE MA zadnego hasla - gdy Vault go
+# nie dostarczy, konto admina dostaje haslo LOSOWE, generowane przy starcie
+# (i jednorazowo pokazane w logu), dokladnie jak DB_PASSWORD w bootstrapie.
 def admin_password():
+    """Zwraca haslo admina z Vaulta/ESO albo None (gdy Vault go nie dostarczyl)."""
     file_path = os.getenv("ADMIN_PASSWORD_FILE")
     from_file = _read_creds_file(file_path) if file_path else None
-    return from_file or os.getenv("ADMIN_PASSWORD") or "admin123"
+    return from_file or os.getenv("ADMIN_PASSWORD") or None
+
+
+def admin_password_or_generated():
+    """Haslo z Vaulta; gdy brak - losowe (jednorazowo widoczne w logu)."""
+    pwd = admin_password()
+    if pwd is not None:
+        return pwd
+    pwd = generate_random_password()
+    print(f"init_db: brak ADMIN_PASSWORD z Vaulta - wygenerowano losowe haslo admina: {pwd}")
+    print("init_db: przejmij kontrole nad haslem: vault kv put davtro/auth ADMIN_PASSWORD='<haslo>'")
+    return pwd
 
 
 async def create_db_pool(user, password):
@@ -254,12 +267,14 @@ async def init_db():
         # Seed per-username: dziala tez, gdy tabela users ma juz innych uzytkownikow
         # (np. po uruchomieniu starszej wersji aplikacji bez seeda admina).
         admin_user = os.getenv("ADMIN_USERNAME", "admin")
-        admin_pass = admin_password()
+        # KROK 5b: haslo WYLACZNIE z Vaulta; gdy Vault go nie dostarczyl -
+        # losowe generowane przy starcie (jedyne miejsce, gdzie je widać: log startu).
+        admin_pass = admin_password_or_generated()
         if await conn.fetchval("SELECT 1 FROM users WHERE username=$1", admin_user) is None:
             await conn.execute(
                 "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'admin') ON CONFLICT (username) DO NOTHING",
                 admin_user, hash_password(admin_pass))
-            print(f"init_db: utworzono konto admina '{admin_user}' (haslo z ADMIN_PASSWORD / domyslne)")
+            print(f"init_db: utworzono konto admina '{admin_user}'")
 
 @app.get("/api/health")
 async def health():
@@ -364,7 +379,7 @@ async def login_user(payload: AuthRequest):
             admin_user = payload.username.strip()
             await conn.execute(
                 "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'admin') ON CONFLICT (username) DO NOTHING",
-                admin_user, hash_password(admin_password()))
+                admin_user, hash_password(admin_password_or_generated()))
             print(f"login: bootstrap konta admina '{admin_user}' (brak konta przy logowaniu)")
             row = await conn.fetchrow("SELECT * FROM users WHERE username=$1", admin_user)
     if row is None or not verify_password(payload.password, row["password_hash"]):

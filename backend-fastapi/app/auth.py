@@ -48,3 +48,9 @@ def verify_password(password: str, stored: str) -> bool:
 def new_session_token() -> str:
     """Token sesyjny do przechowania w Redis (klucz session:<token>, TTL 24h)."""
     return secrets.token_urlsafe(SESSION_TOKEN_BYTES)
+
+
+def generate_random_password(length: int = 24) -> str:
+    """Losowe haslo admina generowane przy starcie, gdy Vault nie dostarczyl
+    ADMIN_PASSWORD (dokladnie jak DB_PASSWORD generowane przez bootstrap)."""
+    return secrets.token_urlsafe(max(16, min(length, 64)))
