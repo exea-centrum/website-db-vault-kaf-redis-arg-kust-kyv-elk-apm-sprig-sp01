@@ -202,12 +202,24 @@ async def init_db():
             password_hash TEXT NOT NULL, role VARCHAR(20) NOT NULL DEFAULT 'user',
             full_name VARCHAR(255), email VARCHAR(255),
             created_at TIMESTAMP DEFAULT NOW())""")
+        # KROK 5 (Auth): kolumny user_id/username sa opcjonalne - aplikacja laczy sie
+        # dynamicznymi credsami z Vaulta, ktore moga nie miec prawa ALTER (tabela
+        # bookings nalezy do wczesniejszego, wygaslego uzytkownika Vault). API musi
+        # wtedy dalej dzialac (bez powiazania rezerwacji z kontem).
+        global BOOKINGS_HAS_USER_ID, BOOKINGS_HAS_USERNAME
         for ddl in ("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS user_id INT",
                     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS username VARCHAR(100)"):
             try:
                 await conn.execute(ddl)
             except Exception as exc:
                 print("init_db: pomijam", ddl, ":", exc)
+        BOOKINGS_HAS_USER_ID = bool(await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns WHERE table_name='bookings' AND column_name='user_id'"))
+        BOOKINGS_HAS_USERNAME = bool(await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns WHERE table_name='bookings' AND column_name='username'"))
+        if not (BOOKINGS_HAS_USER_ID and BOOKINGS_HAS_USERNAME):
+            print("init_db: UWAGA - brak kolumn user_id/username w bookings (brak praw ALTER); "
+                  "rezerwacje nie beda powiazane z kontami, dopoki tabela nalezy do innego uzytkownika")
         count = await conn.fetchval("SELECT COUNT(*) FROM properties")
         if count == 0:
             await conn.execute("""INSERT INTO properties (id, name, location, price, guests, description, amenities) VALUES
@@ -219,9 +231,11 @@ async def init_db():
                 (6, 'Apartament Royal - Krakow', 'krakow', 390, 4, 'Elegancki apartament w Kazimierzu', '["WiFi","Klimatyzacja","Balkon"]')
                 ON CONFLICT DO NOTHING""")
         # KROK 5 (Auth): konto administratora (widzi wszystkie dane gości).
+        # Seed per-username: dziala tez, gdy tabela users ma juz innych uzytkownikow
+        # (np. po uruchomieniu starszej wersji aplikacji bez seeda admina).
         admin_user = os.getenv("ADMIN_USERNAME", "admin")
         admin_pass = os.getenv("ADMIN_PASSWORD", "admin123")
-        if await conn.fetchval("SELECT COUNT(*) FROM users") == 0:
+        if await conn.fetchval("SELECT 1 FROM users WHERE username=$1", admin_user) is None:
             await conn.execute(
                 "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'admin') ON CONFLICT (username) DO NOTHING",
                 admin_user, hash_password(admin_pass))
@@ -247,6 +261,10 @@ async def get_properties():
 
 # KROK 5 (Auth): sesje trzymane w Redis (session:<token>, TTL 24h).
 SESSION_KEY_PREFIX = "session:"
+# Czy tabela bookings ma kolumny powiazania z kontem (wykrywane w init_db - kolumny
+# moga nie istniec, gdy brak praw ALTER do tabeli utworzonej przez innego uzytkownika).
+BOOKINGS_HAS_USER_ID = True
+BOOKINGS_HAS_USERNAME = True
 
 
 async def get_current_user(request: Request) -> Optional[AuthUser]:
@@ -320,6 +338,15 @@ async def login_user(payload: AuthRequest):
     """Login/haslo -> token sesyjny w Redis (Authorization: Bearer)."""
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE username=$1", payload.username.strip())
+        # Bootstrap-awaryjny: brak konta admina (np. seed nie przeszedl przy pierwszym
+        # starcie starszej wersji) -> tworzymy je z ADMIN_PASSWORD przy probie logowania.
+        if row is None and payload.username.strip() == os.getenv("ADMIN_USERNAME", "admin"):
+            admin_user = payload.username.strip()
+            await conn.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'admin') ON CONFLICT (username) DO NOTHING",
+                admin_user, hash_password(os.getenv("ADMIN_PASSWORD", "admin123")))
+            print(f"login: bootstrap konta admina '{admin_user}' (brak konta przy logowaniu)")
+            row = await conn.fetchrow("SELECT * FROM users WHERE username=$1", admin_user)
     if row is None or not verify_password(payload.password, row["password_hash"]):
         raise HTTPException(status_code=401, detail="Nieprawidlowy login lub haslo")
     full_name = decrypt_pii(row["full_name"]) if row["full_name"] else None
