@@ -958,3 +958,14 @@ kubectl -n davtro02 exec postgres-db-0 -- psql -U davtro -d davtro_rentals -c \
 ```
 Po poprawnym wdrożeniu `email` powinno zaczynać się od `vault:v1:` — a w odpowiedzi
 `GET /api/bookings` ponownie będzie to czytelny adres e-mail.
+
+
+**Wyciganie haseł postgresql i aplikacji:**
+```bash
+# ... hasło do bazy postgresql
+kubectl -n davtro02 get secret davtro-secrets -o jsonpath='{.data.DB_PASSWORD}' 2>&1 | base64 -d; echo; echo ---USER---; /snap/bin/microk8s kubectl -n davtro02 get secret davtro-secrets -o jsonpath='{.data.DB_USER}' 2>&1 | base64 -d; echo
+
+# ... wyciganie haseł admin dla app: platforma wynajmu krótkoterminowego
+kubectl -n davtro02 get secret davtro-secrets \
+  -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d; echo
+```
