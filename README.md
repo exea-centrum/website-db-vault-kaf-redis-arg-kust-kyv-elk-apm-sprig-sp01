@@ -969,3 +969,80 @@ kubectl -n davtro02 get secret davtro-secrets -o jsonpath='{.data.DB_PASSWORD}' 
 kubectl -n davtro02 get secret davtro-secrets \
   -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d; echo
 ```
+
+
+---
+
+# KROK 5/5b (Auth) – logowanie rezerwujących + hasło admina z Vaulta
+
+## Logowanie i prywatność danych gości
+- Rezerwacja wymaga zalogowania (`POST /api/bookings` -> 401 bez tokenu).
+- Sesje: token w Redis (`session:<token>`, TTL 24 h), przesyłany jako `Authorization: Bearer`.
+- Hasła: PBKDF2-HMAC-SHA256 (260 tys. iteracji, losowa sól) – `backend-fastapi/app/auth.py`, stdlib, zero nowych zależności.
+- Endpointy: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`.
+- Prywatność: pełne dane gościa (imię, e-mail, telefon, kwota) widzi **tylko właściciel rezerwacji i admin**; pozostali dostają wiersz zamaskowany ("Zastrzeżone", kwota "–"). Daty zostają widoczne (kalendarz dostępności).
+- Własne rezerwacje dostają odznakę **"Moja rezerwacja"** (flaga `mine` z API).
+- Zakładka Admin dla zwykłego użytkownika to "Moje Rezerwacje" (tylko admin widzi pełny panel).
+- Kalendarz per nieruchomość: combobox "Nieruchomość" w formularzu rezerwacji przełącza kalendarz (czerwone dni = zajęte dla danej nieruchomości).
+
+## Schemat bazy (migracje automatyczne w `init_db`)
+- Tabela `users` (username UNIQUE, password_hash, role user/admin, full_name+email szyfrowane Vault Transitem).
+- Kolumny `bookings.user_id` / `bookings.username` – powiązanie rezerwacji z kontem.
+- Świeże instalacje: kolumny są od razu w `CREATE TABLE`; istniejące bazy: `vault-bootstrap` robi idempotentny `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` jako właściciel bazy (dynamiczne credsy z Vaulta nie mają praw ALTER).
+- **Backfill**: rezerwacje powstałe przed migracją są przypisywane do kont po e-mailu gościa (Vault Transit deszyfruje obie strony) – log: `init_db: backfill - przypisano N rezerwacji do kont`.
+
+## Hasło admina – WYŁĄCZNIE z Vaulta (zero haseł w repo)
+- Kolejność pobierania: plik `ADMIN_PASSWORD_FILE` (ESO/Vault) -> env `ADMIN_PASSWORD` (z Secretu `davtro-secrets`) -> **brak? = losowe generowane przy starcie** (jednorazowo widoczne w logu, jak `DB_PASSWORD` w bootstrapie).
+- Bootstrap generuje `davtro/auth` (ADMIN_PASSWORD, 24 znaki) jeśli klucz nie istnieje; istniejący NIGDY nie jest nadpisywany.
+- ESO: `external-secrets.yaml` dociąga `ADMIN_PASSWORD` z KV `davtro/auth` do `davtro-secrets` (deployment ma to w `envFrom`).
+- Szybki test / zmiana hasła ręcznie:
+```bash
+vault kv put davtro/auth ADMIN_PASSWORD='TwojeSilneHaslo'
+kubectl -n davtro02 annotate externalsecret davtro-secrets external-secrets.io/force-sync=$(date +%s) --overwrite
+kubectl -n davtro02 rollout restart deploy/fastapi-web-app
+```
+- Konto admin seeduje się, gdy go nie ma (również awaryjnie przy próbie logowania).
+
+## Zmiana hasła z UI
+- Każdy zalogowany: sekcja "Zaloguj" -> karta "Zmiana własnego hasła" (`POST /api/auth/change-password`, wymaga aktualnego hasła, min. 6 znaków).
+- Admin: zakładka Admin -> karta "Zmiana hasła użytkownika" (`POST /api/auth/admin/set-password`, 403 dla nie-admina) – ustawia hasło dowolnemu kontu.
+
+# KROK 7 – alerty o wygasających certyfikatach (cert-expiry-exporter)
+
+Cert-manager + Vault PKI renewuje certyfikaty automatycznie (ingress 90d/renew 15d, mTLS 30d/renew 7d). Nowy eksporter daje **widoczność**, gdyby renew się nie wydarzył:
+
+- `manifests/base/cert-expiry-exporter.yaml`: eksporter (Python stdlib) skanuje co 60 s Secrety `kubernetes.io/tls` w `davtro02` i wystawia metryki:
+  - `davtro_cert_not_after_seconds{secret=...}` – unix timestamp wygaśnięcia,
+  - `davtro_cert_days_remaining{secret=...}` – dni do końca TTL.
+  Własny ServiceAccount + Role (tylko `get/list secrets` w namespace) – minimalne uprawnienia.
+- `prometheus.yaml`: scrape job `cert-expiry-exporter:9887` + `rule_files: cert-alerts.yml` z alertami:
+
+| Alert | Próg | Poziom |
+|---|---|---|
+| `DavtroCertExpiringSoon` | < 14 dni | warning |
+| `DavtroCertExpiringCritical` | < 3 dni | critical |
+| `DavtroCertExpired` | <= 0 (wygasł) | critical |
+
+- Alerty widoczne w Prometheus UI (`/alerts`, port 9090); po dołożeniu Alertmanagera ruszą powiadomienia.
+- Test:
+```bash
+kubectl -n davtro02 port-forward svc/cert-expiry-exporter 9887:9887 &
+curl -s localhost:9887/metrics
+```
+
+# Dostęp HTTPS z LAN – `scripts/port-forward.sh`
+```bash
+./scripts/port-forward.sh https-fastapi  8443   # https://<IP>:8443 (Ingress, davtro-tls)
+./scripts/port-forward.sh https-frontend 8444   # https://<IP>:8444 (Ingress, davtro-tls)
+./scripts/port-forward.sh https-spring   8445   # https://<IP>:8445 (Ingress)
+./scripts/port-forward.sh https-vault    8243   # Vault (narazie plain HTTP)
+```
+Certy `davtro-tls` podpisuje Vault PKI przez cert-manager i sam je renewuje; w przeglądarce zaakceptuj self-signed CA przy pierwszym wejściu.
+
+# Roadmapa TLS (Etap 4+ – do zrobienia)
+- [ ] Vault HTTPS: `tls_disable=true` w `vault.yaml` -> cert z roli `davtro-internal` + `tls_cert_file/tls_key_file/client_ca_file`; wymaga przestawienia ESO/transit/bootstrap na `https://vault...` + trust CA.
+- [ ] Kafka listener SSL (cert z Vault PKI, mTLS producent/konsument; java-app + fastapi + kafka-ui + exporter).
+- [ ] Redis TLS (wymaga obrazu z TLS lub sidecar stunnel – stock `redis` nie ma TLS).
+- [ ] Alertmanager (Slack/mail) dla reguł `cert-expiry` i reszty alertów.
+- [ ] Auto-unseal Vaulta (cloud KMS / transit) zamiast klucza na PVC.
+- [ ] Dynamiczne credsy Redis/Kafka z Vaulta (redis-database / SASL-SCRAM).
