@@ -116,6 +116,24 @@ start_vault_https() {
   start vault-https "$LOCAL" vault 8200
 }
 
+# ---------------------------------------------------------
+# KROK 6b (dostep HTTPS/mTLS z LAN): wyborcze forwardy przez argumenty,
+# bez odpalania calej paczki HTTP (ADDR domyslnie 0.0.0.0; lokalnie: ADDR=127.0.0.1):
+#   ./scripts/port-forward.sh https-fastapi  8443  -> https://<IP>:8443 (Ingress, davtro-tls)
+#   ./scripts/port-forward.sh https-frontend 8444  -> https://<IP>:8444 (Ingress, davtro-tls)
+#   ./scripts/port-forward.sh https-spring   8445  -> https://<IP>:8445 (Ingress)
+#   ./scripts/port-forward.sh https-vault    8243  -> http://<IP>:8243 (Vault plain HTTP)
+# Certyfikaty davtro-tls podpisuje Vault PKI przez cert-manager i SAM je renewuje
+# przed TTL (duration 90d, renewBefore 15d) - sekret tls.crt/tls.key podmienia sie
+# sam; w przegladarce zaakceptuj self-signed CA przy pierwszym wejsciu.
+# ---------------------------------------------------------
+case "${1:-}" in
+  https-fastapi)  start_https_ingress "${2:-8443}" davtro-ingress; exit 0 ;;
+  https-frontend) start_https_ingress "${2:-8444}" davtro-ingress; exit 0 ;;
+  https-spring)   start_https_ingress "${2:-8445}" davtro-ingress; exit 0 ;;
+  https-vault)    start_vault_https "${2:-8243}"; exit 0 ;;
+esac
+
 echo
 
 echo "=== HTTP (plain) ==="
