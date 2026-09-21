@@ -1039,10 +1039,4 @@ curl -s localhost:9887/metrics
 ```
 Certy `davtro-tls` podpisuje Vault PKI przez cert-manager i sam je renewuje; w przeglądarce zaakceptuj self-signed CA przy pierwszym wejściu.
 
-# Roadmapa TLS (Etap 4+ – do zrobienia)
-- [ ] Vault HTTPS: `tls_disable=true` w `vault.yaml` -> cert z roli `davtro-internal` + `tls_cert_file/tls_key_file/client_ca_file`; wymaga przestawienia ESO/transit/bootstrap na `https://vault...` + trust CA.
-- [ ] Kafka listener SSL (cert z Vault PKI, mTLS producent/konsument; java-app + fastapi + kafka-ui + exporter).
-- [ ] Redis TLS (wymaga obrazu z TLS lub sidecar stunnel – stock `redis` nie ma TLS).
-- [ ] Alertmanager (Slack/mail) dla reguł `cert-expiry` i reszty alertów.
-- [ ] Auto-unseal Vaulta (cloud KMS / transit) zamiast klucza na PVC.
-- [ ] Dynamiczne credsy Redis/Kafka z Vaulta (redis-database / SASL-SCRAM).
+
