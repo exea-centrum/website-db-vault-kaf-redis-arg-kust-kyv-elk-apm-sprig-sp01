@@ -267,6 +267,20 @@ spec:
                   log "restart pgadmin/postgres-exporter/spring (nowe haslo z ESO)"
                 fi
 
+                # KROK 5b (Auth): automatyczny ALTER schematu rezerwacji.
+                # Kolumny user_id/username sa wymagane przez logowanie rezerwujacych
+                # (powiazanie rezerwacji z kontem), a aplikacja laczy sie credsami
+                # z Vaulta BEZ praw ALTER - dlatego wykonuje je bootstrap jako
+                # wlasciciel bazy. Idempotentne (IF NOT EXISTS) - bezpieczne w petli
+                # self-heal i przy pelnym wdrozeniu z ArgoCD od zera.
+                if ! $KUBECTL -n davtro02 exec postgres-db-0 -- psql -U davtro -d davtro_rentals -tAc \
+                    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS user_id INT;
+                     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS username VARCHAR(100);" >/dev/null 2>&1; then
+                  log "ALTER TABLE bookings nieudany (postgres-db-0 nie gotowy?) - retry w nastepnej petli"
+                  return 1
+                fi
+                log "schemat bookings: kolumny user_id/username potwierdzone (automat)"
+
                 vault write database/roles/davtro-app-rw \
                   db_name=davtro-postgresql \
                   creation_statements=@/sql/creation.sql \

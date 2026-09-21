@@ -217,7 +217,7 @@ async def shutdown():
 async def init_db():
     async with db_pool.acquire() as conn:
         await conn.execute('CREATE TABLE IF NOT EXISTS properties (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, location VARCHAR(100), price DECIMAL(10,2), guests INT DEFAULT 2, description TEXT, amenities JSONB DEFAULT \'[]\', created_at TIMESTAMP DEFAULT NOW())')
-        await conn.execute('CREATE TABLE IF NOT EXISTS bookings (id VARCHAR(50) PRIMARY KEY, property_id INT REFERENCES properties(id), guest_name VARCHAR(255), email VARCHAR(255), phone VARCHAR(255), guests INT, check_in DATE, check_out DATE, nights INT, total_price DECIMAL(10,2), status VARCHAR(50) DEFAULT \'confirmed\', pipeline VARCHAR(100) DEFAULT \'Redis -> Kafka -> PostgreSQL\', created_at TIMESTAMP DEFAULT NOW())')
+        await conn.execute('CREATE TABLE IF NOT EXISTS bookings (id VARCHAR(50) PRIMARY KEY, property_id INT REFERENCES properties(id), guest_name VARCHAR(255), email VARCHAR(255), phone VARCHAR(255), guests INT, user_id INT, username VARCHAR(100), check_in DATE, check_out DATE, nights INT, total_price DECIMAL(10,2), status VARCHAR(50) DEFAULT \'confirmed\', pipeline VARCHAR(100) DEFAULT \'Redis -> Kafka -> PostgreSQL\', created_at TIMESTAMP DEFAULT NOW())')
         # KROK 4 (Transit PII) FIX: szyfrogram Vault Transit ("vault:v1:...") ma ~65-90 znakow,
         # a kolumna phone byla VARCHAR(50) -> kazdy INSERT padal z StringDataRightTruncation.
         # Idempotentna migracja baz utworzonych starsza wersja kodu (no-op, gdy juz 255).
@@ -253,6 +253,37 @@ async def init_db():
         if not (BOOKINGS_HAS_USER_ID and BOOKINGS_HAS_USERNAME):
             print("init_db: UWAGA - brak kolumn user_id/username w bookings (brak praw ALTER); "
                   "rezerwacje nie beda powiazane z kontami, dopoki tabela nalezy do innego uzytkownika")
+        elif await conn.fetchval("SELECT COUNT(*) FROM bookings WHERE user_id IS NULL") > 0:
+            # KROK 5b (Backfill): rezerwacje utworzone przed dodaniem kolumn - przypisujemy
+            # je do kont po e-mailu gościa (obie strony deszyfrowane Vault Transitem).
+            # Bez tego wlasciciel widzialby wlasne rezerwacje jako "Zastrzezone".
+            try:
+                orphan_rows = await conn.fetch(
+                    "SELECT id, email FROM bookings WHERE user_id IS NULL AND email IS NOT NULL")
+                user_rows = await conn.fetch("SELECT id, email FROM users WHERE email IS NOT NULL")
+                email_to_uid = {}
+                for u in user_rows:
+                    try:
+                        email_to_uid[(decrypt_pii(u["email"]) or "").strip().lower()] = u["id"]
+                    except Exception:
+                        continue
+                linked = 0
+                for b in orphan_rows:
+                    try:
+                        b_email = (decrypt_pii(b["email"]) or "").strip().lower()
+                    except Exception:
+                        continue
+                    uid = email_to_uid.get(b_email)
+                    if uid is not None:
+                        await conn.execute(
+                            """UPDATE bookings SET user_id=$1,
+                                   username=(SELECT username FROM users WHERE id=$1)
+                               WHERE id=$2""", uid, b["id"])
+                        linked += 1
+                if linked:
+                    print(f"init_db: backfill - przypisano {linked} rezerwacji do kont (po e-mailu)")
+            except Exception as exc:
+                print("init_db: backfill rezerwacji pominiony:", exc)
         count = await conn.fetchval("SELECT COUNT(*) FROM properties")
         if count == 0:
             await conn.execute("""INSERT INTO properties (id, name, location, price, guests, description, amenities) VALUES
