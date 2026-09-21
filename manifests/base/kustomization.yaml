@@ -26,6 +26,7 @@ resources:
 - spring-app.yaml
 - spark.yaml
 - prometheus.yaml
+- cert-expiry-exporter.yaml
 - exporters.yaml
 - grafana.yaml
 - loki.yaml
