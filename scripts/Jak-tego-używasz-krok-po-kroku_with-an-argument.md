@@ -14,13 +14,13 @@
 # Port-forwarding uslug DavTro + ekstrakcja certyfikatow do /tmp/ctr/
 #
 # Domyslnie bindowanie na 0.0.0.0 (widoczne z sieci).
-# Lokalnie (tylko ta maszyna):  ADDR=127.0.0.1 ./scripts/port-forward.sh
+# Lokalnie (tylko ta maszyna):  ADDR=127.0.0.1 ./scripts/port-forward-with-an-argument.sh
 #
-# UWAGA: port 8080 jest ZAJETY przez port-forward-with-an-argument ArgoCD, wiec:
+# UWAGA: port 8080 jest ZAJETY przez port-forward-with-an-argument-with-an-argument ArgoCD, wiec:
 #   FastAPI -> 8082, frontend -> 8083, spring -> 8084, spark-ui -> 8085
 #
 # ArgoCD (uruchamiane recznie, port 8080 -> 443, TLS/HTTPS):
-#   kubectl port-forward-with-an-argument --address 0.0.0.0 -n argocd service/argo-cd-argocd-server 8080:443
+#   kubectl port-forward-with-an-argument-with-an-argument --address 0.0.0.0 -n argocd service/argo-cd-argocd-server 8080:443
 #   UI: https://<IP-HOSTA>:8080/   (HTTP -> 307 na HTTPS; zaakceptuj certyfikat self-signed)
 
 set -u
