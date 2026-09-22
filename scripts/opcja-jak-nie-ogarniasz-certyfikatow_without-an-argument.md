@@ -750,9 +750,9 @@ curl -skv --resolve davtro.local:8444:127.0.0.1  https://davtro.local:8444/
 curl -skv --resolve davtro.local:8444:192.168.1.19 https://davtro.local:8444/
 ```
 
-## Co robić — kolejność
+# Co robić — kolejność
 
-### Krok 1 — na maszynie z K8s
+# Krok 1 — na maszynie z K8s
 
 Upewnij się, że `port-forward` żyje:
 
@@ -770,7 +770,7 @@ curl -skv --resolve davtro.local:8444:127.0.0.1 https://davtro.local:8444/ 2>&1 
 
 **Wklej wynik.** Jeśli tu dostaniesz `HTTP/2 200` — Ingress działa poprawnie, problem był tylko w Hoscie.
 
-### Krok 2 — na maszynie klienta (inny komputer)
+# Krok 2 — na maszynie klienta (inny komputer)
 
 Sprawdź, czy widzisz maszynę z K8s:
 
