@@ -1,11 +1,11 @@
 #!/bin/bash
-# client-setup.sh — uruchamiane na komputerze KLIENTA (Windows/macOS/Linux)
+# client-port-forward-without-an-argument.sh — uruchamiane na komputerze KLIENTA (Windows/macOS/Linux)
 # Pobiera certyfikaty z maszyny z K8s i importuje je do systemu/przegladarki.
 #
 # Uzycie:
-#   ./client-setup.sh                       # tylko CA (bez mTLS)
-#   ./client-setup.sh --mtls fastapi        # CA + cert klienta fastapi-mtls.pfx
-#   ./client-setup.sh --uninstall           # usuwa CA i cert klienta
+#   ./client-port-forward-without-an-argument.sh                       # tylko CA (bez mTLS)
+#   ./client-port-forward-without-an-argument.sh --mtls fastapi        # CA + cert klienta fastapi-mtls.pfx
+#   ./client-port-forward-without-an-argument.sh --uninstall           # usuwa CA i cert klienta
 #
 # Wymaga: curl, base64. Opcjonalnie: openssl (do weryfikacji).
 

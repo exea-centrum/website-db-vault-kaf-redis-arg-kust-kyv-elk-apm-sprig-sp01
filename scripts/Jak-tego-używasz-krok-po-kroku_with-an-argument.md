@@ -3,7 +3,7 @@
 1. **Bez argumentu** — odpala forwardy HTTP **oraz** od razu wyciąga wszystkie certyfikaty z Secretów do `/tmp/ctr/`.
 2. **Wszystko ląduje w `/tmp/ctr/`** — `.crt`, `.key`, `-ca.crt`, `.pfx`, `.p12`.
 3. **Hasło do `.pfx` zaszyte na sztywno**: `slodkadziurkazwypiekami` (możesz nadpisać przez `PFX_PASS=... ./scripts/port-forward.sh`).
-4. **Drugi skrypt klienta** — `client-port-forward-without-an-argument.sh` — pobiera z `http://192.168.1.19:8099/` (albo z SMB) pliki i importuje je lokalnie.
+4. **Drugi skrypt klienta** — `client-port-forward-with-an-argument.sh` — pobiera z `http://192.168.1.19:8099/` (albo z SMB) pliki i importuje je lokalnie.
 
 ---
 
@@ -16,11 +16,11 @@
 # Domyslnie bindowanie na 0.0.0.0 (widoczne z sieci).
 # Lokalnie (tylko ta maszyna):  ADDR=127.0.0.1 ./scripts/port-forward.sh
 #
-# UWAGA: port 8080 jest ZAJETY przez port-forward-without-an-argument ArgoCD, wiec:
+# UWAGA: port 8080 jest ZAJETY przez port-forward-with-an-argument ArgoCD, wiec:
 #   FastAPI -> 8082, frontend -> 8083, spring -> 8084, spark-ui -> 8085
 #
 # ArgoCD (uruchamiane recznie, port 8080 -> 443, TLS/HTTPS):
-#   kubectl port-forward-without-an-argument --address 0.0.0.0 -n argocd service/argo-cd-argocd-server 8080:443
+#   kubectl port-forward-with-an-argument --address 0.0.0.0 -n argocd service/argo-cd-argocd-server 8080:443
 #   UI: https://<IP-HOSTA>:8080/   (HTTP -> 307 na HTTPS; zaakceptuj certyfikat self-signed)
 
 set -u
@@ -354,19 +354,19 @@ echo "Certyfikaty:    $CTR_DIR/"
 
 ---
 
-## Skrypt 2 — `client-port-forward-without-an-argument.sh` (na komputerze klienta)
+## Skrypt 2 — `client-port-forward-with-an-argument.sh` (na komputerze klienta)
 
 Ten skrypt uruchamiasz **na komputerze klienta** (tym z przeglądarką). Pobiera certyfikaty z maszyny z K8s (`192.168.1.19:8099`) i importuje je lokalnie.
 
 ```bash
 #!/bin/bash
-# client-port-forward-without-an-argument.sh — uruchamiane na komputerze KLIENTA (Windows/macOS/Linux)
+# client-port-forward-with-an-argument.sh — uruchamiane na komputerze KLIENTA (Windows/macOS/Linux)
 # Pobiera certyfikaty z maszyny z K8s i importuje je do systemu/przegladarki.
 #
 # Uzycie:
-#   ./client-port-forward-without-an-argument.sh                       # tylko CA (bez mTLS)
-#   ./client-port-forward-without-an-argument.sh --mtls fastapi        # CA + cert klienta fastapi-mtls.pfx
-#   ./client-port-forward-without-an-argument.sh --uninstall           # usuwa CA i cert klienta
+#   ./client-port-forward-with-an-argument.sh                       # tylko CA (bez mTLS)
+#   ./client-port-forward-with-an-argument.sh --mtls fastapi        # CA + cert klienta fastapi-mtls.pfx
+#   ./client-port-forward-with-an-argument.sh --uninstall           # usuwa CA i cert klienta
 #
 # Wymaga: curl, base64. Opcjonalnie: openssl (do weryfikacji).
 
@@ -534,10 +534,10 @@ echo "  https://${K8S_HOST}:8445/   (spring przez Ingress)"
 
 ```bash
 # 1. Odpal forwardy HTTP + wyciagnij certy do /tmp/ctr/
-./scripts/port-forward-without-an-argument.sh
+./scripts/port-forward-with-an-argument.sh
 
 # 2. Wystaw certy klientom przez HTTP
-./scripts/port-forward-without-an-argument.sh serve
+./scripts/port-forward-with-an-argument.sh serve
 # → http://192.168.1.19:8099/  (zostaw w tmux)
 ```
 
@@ -561,17 +561,17 @@ message-processor-mtls.pfx
 
 ```bash
 # 1. Pobierz skrypt klienta z maszyny z K8s
-curl -O http://192.168.1.19:8099/client-port-forward-without-an-argument.sh
-chmod +x client-port-forward-without-an-argument.sh
+curl -O http://192.168.1.19:8099/client-port-forward-with-an-argument.sh
+chmod +x client-port-forward-with-an-argument.sh
 
 # 2. Tylko CA (bez mTLS) — dla zwyklej przegladarki
-./client-port-forward-without-an-argument.sh
+./client-port-forward-with-an-argument.sh
 
 # 3. CA + cert klienta (mTLS) — jesli serwer wymaga certyfikatu klienta
-./client-port-forward-without-an-argument.sh --mtls fastapi
+./client-port-forward-with-an-argument.sh --mtls fastapi
 
 # 4. Odinstalowanie
-./client-port-forward-without-an-argument.sh --uninstall
+./client-port-forward-with-an-argument.sh --uninstall
 ```
 
 ---
@@ -580,10 +580,10 @@ chmod +x client-port-forward-without-an-argument.sh
 
 | Miejsce | Wartość |
 |---------|---------|
-| `port-forward-without-an-argument.sh` (domyślnie) | `slodkadziurkazwypiekami` |
-| `client-port-forward-without-an-argument.sh` (domyślnie) | `slodkadziurkazwypiekami` |
-| Nadpisanie przy uruchomieniu | `PFX_PASS="inne" ./scripts/port-forward-without-an-argument.sh` |
-| Nadpisanie po stronie klienta | `PFX_PASS="inne" ./client-port-forward-without-an-argument-without-an-argument.sh --mtls fastapi` |
+| `port-forward-with-an-argument.sh` (domyślnie) | `slodkadziurkazwypiekami` |
+| `client-port-forward-with-an-argument.sh` (domyślnie) | `slodkadziurkazwypiekami` |
+| Nadpisanie przy uruchomieniu | `PFX_PASS="inne" ./scripts/port-forward-with-an-argument.sh` |
+| Nadpisanie po stronie klienta | `PFX_PASS="inne" ./client-port-forward-with-an-argument-without-an-argument.sh --mtls fastapi` |
 
 Hasło musi być **takie samo** po obu stronach — inaczej import `.pfx` się nie powiedzie.
 
@@ -592,9 +592,9 @@ Hasło musi być **takie samo** po obu stronach — inaczej import `.pfx` się n
 ## Uwagi
 
 1. **Skrypt klienta nie potrzebuje `kubectl`** — pobiera gotowe pliki przez HTTP.
-2. **`client-port-forward-without-an-argument.sh` musi być dostępny na serwerze HTTP** — wrzuć go do `/tmp/ctr/` przed `serve`:
+2. **`client-port-forward-with-an-argument.sh` musi być dostępny na serwerze HTTP** — wrzuć go do `/tmp/ctr/` przed `serve`:
    ```bash
-   cp scripts/client-port-forward-without-an-argument.sh /tmp/ctr/
+   cp scripts/client-port-forward-with-an-argument.sh /tmp/ctr/
    ```
 3. **`serve` binduje na `0.0.0.0:8099`** — jeśli nie chcesz wystawiać na cały LAN, użyj `--bind 127.0.0.1` i tuneluj SSH.
 4. **Po restarcie maszyny z K8s** — forwardy i `serve` padają. Warto owinąć w `systemd` albo odpalać w `tmux`.
