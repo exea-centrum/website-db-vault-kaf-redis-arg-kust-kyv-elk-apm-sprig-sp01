@@ -155,6 +155,7 @@ start kafka       9092 kafka-kraft         9092
 start kafka-exp   9308 kafka-exporter      9308
 start pg-exp      9187 postgres-exporter   9187
 start node-exp    9101 node-exporter       9100
+start alertmanager 9093 alertmanager      9093
 
 echo
 

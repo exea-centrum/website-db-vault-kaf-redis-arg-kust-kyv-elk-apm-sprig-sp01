@@ -1040,3 +1040,23 @@ curl -s localhost:9887/metrics
 Certy `davtro-tls` podpisuje Vault PKI przez cert-manager i sam je renewuje; w przeglądarce zaakceptuj self-signed CA przy pierwszym wejściu.
 
 
+
+---
+
+# KROK 8 – Alertmanager (powiadomienia email z alertow)
+
+- `manifests/base/alertmanager.yaml`: Deployment `prom/alertmanager` + Service `alertmanager:9093`.
+- **Sekrety SMTP nie sa w ConfigMapie**: `alertmanager.yml` jest TEMPLATEM, a `start.sh` podstawia przy starcie `SMTP_HOST/PORT/USER/PASSWORD` (z Vaulta przez ESO, Secret `davtro-secrets`) i `FROM_EMAIL`. Odbiorca: env `ALERT_EMAIL_TO` (domyslnie FROM_EMAIL).
+- Bez skonfigurowanego SMTP alerty sa widoczne w UI Alertmanagera (port 9093), email ruszy po ustawieniu sekretow SMTP w Vault (`vault kv put davtro/smtp SMTP_HOST=... SMTP_USER=... SMTP_PASSWORD=...` + restart).
+- Prometheus: `alerting.alertmanagers -> alertmanager:9093`; nowa grupa regul `target-health` - alert `DavtroTargetDown` gdy scrape target (fastapi/postgres-exporter/kafka-exporter/node-exporter/cert-expiry) lezy 5 min.
+- Routing: severity=critical -> receiver email-critical (grupowanie po alertname+secret, repeat 4h).
+- UI: `./scripts/port-forward.sh` (nowa linia `start alertmanager 9093`) albo bezposrednio `kubectl -n davtro02 port-forward svc/alertmanager 9093:9093` -> http://localhost:9093
+- Test: `amtool` nie jest potrzebny - wystarczy wymusic alert: tymczasowo obniz prog w `cert-alerts.yml` albo wylacz pod cert-expiry-exporter (pojawi sie `DavtroTargetDown` i mail).
+
+# Roadmapa TLS (Etap 4+ – do zrobienia)
+- [x] Alertmanager (email) dla regul `cert-expiry` i `target-health` (KROK 8).
+- [ ] Vault HTTPS: `tls_disable=true` w `vault.yaml` -> cert z roli `davtro-internal` + `tls_cert_file/tls_key_file/client_ca_file`; wymaga przestawienia ESO/transit/bootstrap na `https://vault...` + trust CA.
+- [ ] Kafka listener SSL (cert z Vault PKI, mTLS producent/konsument; java-app + fastapi + kafka-ui + exporter).
+- [ ] Redis TLS (wymaga obrazu z TLS lub sidecar stunnel – stock `redis` nie ma TLS).
+- [ ] Dynamiczne credsy Redis/Kafka z Vaulta (redis-database / SASL-SCRAM).
+- [ ] Auto-unseal Vaulta (cloud KMS / transit) zamiast klucza na PVC.
