@@ -82,3 +82,8 @@ spec:
             - name: backup
               persistentVolumeClaim:
                 claimName: vault-backup
+            # UWAGA: mount 'vault-tls' MUSI miec odpowiadajacy wolumen, inaczej
+            # CronJob jest niepoprawny i ArgoCD wywala CALY sync (SyncError).
+            # optional: cert powstaje dopiero po starcie Vaulta (klero-wajka).
+            - name: vault-tls
+              secret: { secretName: vault-tls, optional: true }

@@ -20,7 +20,9 @@ spec:
       volumes:
         - { name: db-creds, secret: { secretName: fastapi-db-creds } }
         - { name: transit-helpers, configMap: { name: transit-helpers } }
-        - { name: vault-tls, secret: { secretName: vault-tls } }
+        # optional: cert vault-tls wystawia cert-manager dopiero po starcie Vaulta
+        # (klero-wajka) - bez tego nowe pody utykaja w ContainerCreating.
+        - { name: vault-tls, secret: { secretName: vault-tls, optional: true } }
         - { name: fastapi-mtls, secret: { secretName: fastapi-mtls } }
       containers:
         - name: fastapi

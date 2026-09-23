@@ -15,7 +15,8 @@ spec:
         fsGroup: 1000
       volumes:
         - { name: transit-helpers, configMap: { name: transit-helpers } }
-        - { name: vault-tls, secret: { secretName: vault-tls } }
+        # optional: cert vault-tls powstaje po starcie Vaulta (klero-wajka)
+        - { name: vault-tls, secret: { secretName: vault-tls, optional: true } }
         - { name: spring-app-mtls, secret: { secretName: spring-app-mtls } }
       containers:
         - name: spring-app

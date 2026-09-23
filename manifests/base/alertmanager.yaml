@@ -48,11 +48,11 @@ data:
     FROM="${FROM_EMAIL:-admin@davtro.local}"
     TO="${ALERT_EMAIL_TO:-$FROM}"
     [ -n "${SMTP_HOST:-}" ] || echo "UWAGA: brak SMTP_HOST - alerty nie wysylaja email (widoczne w UI :9093)"
-    sed -e "s|__FROM__|$FROM|g" \\
-        -e "s|__SMTPHOST__|$HOST:$PORT|g" \\
-        -e "s|__SMTPUSER__|$USER|g" \\
-        -e "s|__SMTPPASS__|$PASS|g" \\
-        -e "s|__TO__|$TO|g" \\
+    sed -e "s|__FROM__|$FROM|g" \
+        -e "s|__SMTPHOST__|$HOST:$PORT|g" \
+        -e "s|__SMTPUSER__|$USER|g" \
+        -e "s|__SMTPPASS__|$PASS|g" \
+        -e "s|__TO__|$TO|g" \
         /etc/alertmanager/alertmanager.yml.tpl > /tmp/alertmanager.yml
     exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
 ---

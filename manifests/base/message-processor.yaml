@@ -17,7 +17,8 @@ spec:
       volumes:
         - { name: db-creds, secret: { secretName: message-processor-db-creds } }
         - { name: transit-helpers, configMap: { name: transit-helpers } }
-        - { name: vault-tls, secret: { secretName: vault-tls } }
+        # optional: cert vault-tls powstaje po starcie Vaulta (klero-wajka)
+        - { name: vault-tls, secret: { secretName: vault-tls, optional: true } }
         - { name: message-processor-mtls, secret: { secretName: message-processor-mtls } }
       containers:
         - name: message-processor
