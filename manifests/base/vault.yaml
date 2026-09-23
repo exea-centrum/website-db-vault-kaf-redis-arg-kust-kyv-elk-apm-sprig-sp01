@@ -34,8 +34,24 @@ data:
       tls_disable     = true   # KROK 9: zostaje jako fallback (bootstrap przy pierwszym starcie
                                # jeszcze nie ma certu) + metryki scrape; docelowo do wylaczenia
     }
-    # KROK 9 (Vault HTTPS): drugi listener z TLS (certyfikat cert-manager/Vault PKI,
-    # secret vault-tls z tls.crt/tls.key/ca.crt, renew automatyczny co 7 dni).
+    # KROK 9: TLS listener jest w config-tls.hcl (start.sh wybiera config wg
+    # dostepnosci certu - rozwiazuje klero-wajke: cert wymaga dzialajacego Vaulta).
+    telemetry {
+      prometheus_retention = "12h"
+    }
+  config-tls.hcl: |
+    # KROK 9: dual-listener - plain 8200 (bootstrap/fallback/metryki) + TLS 8203.
+    disable_mlock = true
+    ui = true
+    storage "raft" {
+      path    = "/vault/data"
+      node_id = "vault-0"
+    }
+    listener "tcp" {
+      address         = "0.0.0.0:8200"
+      cluster_address = "0.0.0.0:8201"
+      tls_disable     = true
+    }
     listener "tcp" {
       address         = "0.0.0.0:8203"
       cluster_address = "0.0.0.0:8202"
@@ -47,6 +63,20 @@ data:
     telemetry {
       prometheus_retention = "12h"
     }
+  start.sh: |
+    #!/bin/sh
+    # KROK 9: wybiera config wg dostepnosci certu - rozwiazuje klero-wajke
+    # (certyfikat vault-tls moze byc wystawiony dopiero po starcie Vaulta).
+    # Marker /tmp/tls-enabled czyta vault-bootstrap (auto-restart po pojawieniu sie certu).
+    if [ -f /vault/tls/tls.crt ] && [ -f /vault/tls/tls.key ]; then
+      echo "Vault: TLS listener :8203 wlaczony (cert z Vault PKI)"
+      cp /vault/config/config-tls.hcl /tmp/vault.hcl
+      touch /tmp/tls-enabled
+    else
+      echo "Vault: brak certu (secret vault-tls) - start plain :8200 (bootstrap wystawi cert)"
+      cp /vault/config/config.hcl /tmp/vault.hcl
+    fi
+    exec vault server -config=/tmp/vault.hcl
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -89,7 +119,7 @@ spec:
       containers:
         - name: vault
           image: hashicorp/vault:1.17
-          command: ["vault", "server", "-config=/vault/config/config.hcl"]
+          command: ["sh", "/vault/config/start.sh"]
           ports:
             - { containerPort: 8200, name: http }
             - { containerPort: 8201, name: internal }
@@ -126,8 +156,9 @@ spec:
       volumes:
         - name: config
           configMap: { name: vault-config }
+        # optional: cert moze jeszcze nie istniec przy pierwszym starcie (klero-wajka)
         - name: vault-tls
-          secret: { secretName: vault-tls }
+          secret: { secretName: vault-tls, optional: true }
   volumeClaimTemplates:
     - metadata: { name: vault-data }
       spec:

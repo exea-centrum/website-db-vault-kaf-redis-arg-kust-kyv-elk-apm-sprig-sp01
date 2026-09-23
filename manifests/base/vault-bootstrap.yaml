@@ -281,6 +281,17 @@ spec:
                 fi
                 log "schemat bookings: kolumny user_id/username potwierdzone (automat)"
 
+                # KROK 9 (Vault HTTPS): gdy cert-manager wystawil secret vault-tls,
+                # a Vault startuje jeszcze bez TLS (marker /tmp/tls-enabled brak) ->
+                # jednorazowy restart StatefulSeta wlacza TLS listener :8203.
+                if $KUBECTL -n davtro02 get secret vault-tls >/dev/null 2>&1; then
+                  if ! $KUBECTL -n davtro02 exec vault-0 -- test -f /tmp/tls-enabled >/dev/null 2>&1; then
+                    log "cert vault-tls istnieje - restart Vaulta (wlaczenie TLS :8203)"
+                    $KUBECTL -n davtro02 rollout restart statefulset/vault >/dev/null 2>&1 || true
+                    sleep 15
+                  fi
+                fi
+
                 vault write database/roles/davtro-app-rw \
                   db_name=davtro-postgresql \
                   creation_statements=@/sql/creation.sql \
