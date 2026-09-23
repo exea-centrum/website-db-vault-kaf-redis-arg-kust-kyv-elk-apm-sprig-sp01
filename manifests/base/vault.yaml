@@ -69,11 +69,14 @@ data:
     }
   start.sh: |
     #!/bin/sh
-    # KROK 9: wybiera config wg dostepnosci certu - rozwiazuje klero-wajke
-    # (certyfikat vault-tls moze byc wystawiony dopiero po starcie Vaulta).
-    # Marker /tmp/tls-enabled czyta vault-bootstrap (auto-restart po pojawieniu sie certu).
+    # KROK 9: wybiera config wg dostepnosci certu. Cert `vault-tls` pochodzi z
+    # DEDYKOWANEGO CA cert-managera (vault-server-tls.yaml), a NIE z Vault PKI,
+    # wiec istnieje ZANIM Vault wystartuje - bledne kolo nie powstaje i ten
+    # warunek wybiera TLS od pierwszego startu. Fallback plain :8200 obsluguje
+    # tylko jednorazowa migracje istniejacej instalacji (brak sekretu vault-tls).
+    # Marker /tmp/tls-enabled czyta vault-bootstrap (jednorazowy restart migracyjny).
     if [ -f /vault/tls/tls.crt ] && [ -f /vault/tls/tls.key ]; then
-      echo "Vault: TLS listener :8203 wlaczony (cert z Vault PKI)"
+      echo "Vault: TLS listener :8203 wlaczony (cert z dedykowanego CA cert-managera)"
       cp /vault/config/config-tls.hcl /tmp/vault.hcl
       touch /tmp/tls-enabled
     else
