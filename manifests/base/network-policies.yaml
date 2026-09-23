@@ -40,6 +40,10 @@ spec:
       ports:
         - { protocol: TCP, port: 8200 }
         - { protocol: TCP, port: 8201 }
+        # KROK 9 (Vault HTTPS): ESO laczy sie z :8203 (TLS). Bez tej reguly
+        # default-deny zjadal ruch ESO -> SecretStore 'context deadline exceeded'
+        # -> sekrety nie powstawaly, pody padaly z 'secret not found'.
+        - { protocol: TCP, port: 8203 }
   policyTypes: [Ingress]
 ---
 apiVersion: networking.k8s.io/v1
