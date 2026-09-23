@@ -56,7 +56,9 @@ spec:
                 allowPrivilegeEscalation: false
               env:
                 - name: VAULT_ADDR
-                  value: http://vault.davtro02.svc.cluster.local:8200
+                  value: https://vault.davtro02.svc.cluster.local:8203
+                - name: VAULT_CACERT
+                  value: /etc/vault-tls/ca.crt
               command: ["/bin/sh", "-c"]
               args:
                 - |
@@ -70,6 +72,9 @@ spec:
               volumeMounts:
                 - name: backup
                   mountPath: /backup
+                - name: vault-tls
+                  mountPath: /etc/vault-tls
+                  readOnly: true
               resources:
                 requests: { cpu: 50m, memory: 64Mi }
                 limits: { cpu: 200m, memory: 128Mi }

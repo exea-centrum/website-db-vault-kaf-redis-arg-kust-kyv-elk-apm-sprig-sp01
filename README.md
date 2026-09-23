@@ -1055,8 +1055,25 @@ Certy `davtro-tls` podpisuje Vault PKI przez cert-manager i sam je renewuje; w p
 
 # Roadmapa TLS (Etap 4+ – do zrobienia)
 - [x] Alertmanager (email) dla regul `cert-expiry` i `target-health` (KROK 8).
-- [ ] Vault HTTPS: `tls_disable=true` w `vault.yaml` -> cert z roli `davtro-internal` + `tls_cert_file/tls_key_file/client_ca_file`; wymaga przestawienia ESO/transit/bootstrap na `https://vault...` + trust CA.
+- [x] Vault HTTPS: TLS listener :8203 (dual-listener, zero przestoju) - KROK 9. Zostalo: finalne wylaczenie :8200 + ClusterIssuery na https.
 - [ ] Kafka listener SSL (cert z Vault PKI, mTLS producent/konsument; java-app + fastapi + kafka-ui + exporter).
 - [ ] Redis TLS (wymaga obrazu z TLS lub sidecar stunnel – stock `redis` nie ma TLS).
 - [ ] Dynamiczne credsy Redis/Kafka z Vaulta (redis-database / SASL-SCRAM).
 - [ ] Auto-unseal Vaulta (cloud KMS / transit) zamiast klucza na PVC.
+
+---
+
+# KROK 9 – Vault HTTPS (TLS :8203, dual-listener)
+
+- **Serwer** (`vault.yaml`): drugi listener `tcp` na 8203 z TLS (`tls_cert_file=/vault/tls/tls.crt`, min TLS 1.2). HTTP :8200 zostaje jako fallback bootstrapu + metryki; Service ma port `https 8203`.
+- **Certyfikat** (`mtls-certificates.yaml`): `Certificate/vault-tls` z wewnetrznego PKI (`vault-issuer-internal`), CN `vault.davtro02.svc` + SAN-y (vault, vault-0..., localhost-brak). Renew automatyczny co 7 dni. Sekret `vault-tls` zawiera `tls.crt/tls.key/ca.crt`.
+- **Klienci przelaczeni na `https://vault.davtro02.svc.cluster.local:8203`:**
+  - ESO: `secret-store.yaml` (2 store'y), `external-secrets-db-dynamic.yaml` (VaultDynamicSecret) - `caProvider` typ Secret `vault-tls` key `ca.crt` (CA czytane z sekretu, nic w Git).
+  - FastAPI: `deployment.yaml` - env `VAULT_TRANSIT_ADDR=https...:8203`, `VAULT_TRANSIT_CA_FILE=/etc/vault-tls/ca.crt`, mount `vault-tls`; `transit_client.py` weryfikuje CA (fail-safe: bez certu fallback plaintext z logiem, jak KROK 4).
+  - Spring + message-processor: te same env + mount (po stronie kodu Java wymaga wsparcia CA_FILE - do weryfikacji przy wdrozeniu).
+  - transit-helpers (skrypty vault CLI): `VAULT_ADDR=https...:8203` + `VAULT_CACERT=/etc/vault-tls/ca.crt`.
+  - Snapshot CronJob: `VAULT_ADDR=https...:8203` + `VAULT_CACERT` + mount.
+- **Celowo na HTTP:8200 zostaja**: cert-manager ClusterIssuery (caBundle wymagalby CA generowanego dopiero przez bootstrap - niemozliwe w Git; finalny etap migracji), bootstrap (first-boot przed wystawieniem certu), scrape metryk.
+- Zero przestoju: dual-listener, pod Vaulta podmienia cert w wolumenie automatycznie (kubelet), ESO/APP bledy w oknie przed wystawieniem certu self-heal (retry).
+- Test: `./scripts/port-forward.sh https-vault 8243` (forward do :8203 TLS) -> `vault status` z `VAULT_CACERT=/etc/vault-tls/ca.crt` albo przegladarka (self-signed CA).
+- Finalny etap (po potwierdzeniu dzialania TLS): wylaczyc listener 8200, przelaczyc ClusterIssuery na 8203 + caBundle, zaktualizowac `VAULT_API_ADDR/CLUSTER_ADDR` na https.

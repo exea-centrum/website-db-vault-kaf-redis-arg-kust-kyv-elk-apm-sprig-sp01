@@ -79,8 +79,8 @@ spec:
             - secretRef: { name: davtro-secrets }
             - configMapRef: { name: fastapi-config }
           env:
-            # Gdzie wysylac alerty (domyslnie FROM_EMAIL); nadpisz w tym ConfigMapie/redeployu
-            - { name: ALERT_EMAIL_TO, value: "" }
+            # Odbiorca alertow (ustawione na zyczenie uzytkownika)
+            - { name: ALERT_EMAIL_TO, value: "trojanowski.david@gmail.com" }
           volumeMounts:
             - { name: config, mountPath: /etc/alertmanager }
           readinessProbe:

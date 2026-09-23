@@ -86,3 +86,32 @@ spec:
     - key encipherment
     - client auth
     - server auth
+---
+# KROK 9 (Vault HTTPS): certyfikat serwera Vault (TLS na :8203).
+# Wydany z wewnetrznego PKI davtro-internal; cert-manager SAM go renewuje
+# (renewBefore 7 dni). Sekret vault-tls zawiera tez ca.crt (CA davtro-internal),
+# z ktorego korzystaja klienci (ESO caProvider, transit_client, snapshot, helpers).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vault-tls
+  namespace: davtro02
+spec:
+  secretName: vault-tls
+  duration: 720h
+  renewBefore: 168h
+  commonName: vault.davtro02.svc
+  dnsNames:
+    - vault
+    - vault.davtro02
+    - vault.davtro02.svc
+    - vault.davtro02.svc.cluster.local
+    - vault-0.vault.davtro02.svc.cluster.local
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  issuerRef:
+    name: vault-issuer-internal
+    kind: ClusterIssuer
+    group: cert-manager.io

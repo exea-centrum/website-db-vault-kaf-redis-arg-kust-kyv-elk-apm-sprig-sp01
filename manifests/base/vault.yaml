@@ -31,7 +31,18 @@ data:
     listener "tcp" {
       address         = "0.0.0.0:8200"
       cluster_address = "0.0.0.0:8201"
-      tls_disable     = true   # docelowo PKI / Etap 4 - TLS wewnetrzny
+      tls_disable     = true   # KROK 9: zostaje jako fallback (bootstrap przy pierwszym starcie
+                               # jeszcze nie ma certu) + metryki scrape; docelowo do wylaczenia
+    }
+    # KROK 9 (Vault HTTPS): drugi listener z TLS (certyfikat cert-manager/Vault PKI,
+    # secret vault-tls z tls.crt/tls.key/ca.crt, renew automatyczny co 7 dni).
+    listener "tcp" {
+      address         = "0.0.0.0:8203"
+      cluster_address = "0.0.0.0:8202"
+      tls_cert_file     = "/vault/tls/tls.crt"
+      tls_key_file      = "/vault/tls/tls.key"
+      tls_client_ca_file = "/vault/tls/ca.crt"
+      tls_min_version   = "tls12"
     }
     telemetry {
       prometheus_retention = "12h"
@@ -106,12 +117,17 @@ spec:
               mountPath: /vault/data
             - name: config
               mountPath: /vault/config
+            - name: vault-tls
+              mountPath: /vault/tls
+              readOnly: true
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: 500m, memory: 512Mi }
       volumes:
         - name: config
           configMap: { name: vault-config }
+        - name: vault-tls
+          secret: { secretName: vault-tls }
   volumeClaimTemplates:
     - metadata: { name: vault-data }
       spec:
@@ -128,3 +144,4 @@ spec:
   ports:
     - { name: http, port: 8200, targetPort: 8200 }
     - { name: internal, port: 8201, targetPort: 8201 }
+    - { name: https, port: 8203, targetPort: 8203 }

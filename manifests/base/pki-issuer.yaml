@@ -4,6 +4,9 @@
 # z CRD (helm install jetstack/cert-manager --set crds.enabled=true).
 # ClusterIssuer jest klastrowy (cert-manager potrzebuje roli K8s auth w Vault),
 # a Certificate leza w davtro02 obok Ingressow, ktore je konsumuja (spec.tls).
+# KROK 9: ClusterIssuery celowo na HTTP:8200 (dual-listener) - caBundle dla https
+# wymagaby wartosci CA generowanego dopiero przez bootstrap (nie da sie z gory w Git).
+# Zostalo do zrobienia w finalnym etapie migracji TLS.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -20,6 +23,9 @@ spec:
 # KROK 6 (mTLS): ClusterIssuer dla certyfikatów wewnętrznych (davtro-internal).
 # Używany przez mtls-certificates.yaml do wystawiania certyfikatów client-cert.
 # Token auth (jak vault-issuer) - działa niezależnie od Kubernetes auth config.
+# KROK 9: ClusterIssuery celowo na HTTP:8200 (dual-listener) - caBundle dla https
+# wymagaby wartosci CA generowanego dopiero przez bootstrap (nie da sie z gory w Git).
+# Zostalo do zrobienia w finalnym etapie migracji TLS.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:

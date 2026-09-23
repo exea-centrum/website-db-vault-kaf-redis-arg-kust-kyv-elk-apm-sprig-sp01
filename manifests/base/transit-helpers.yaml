@@ -15,7 +15,8 @@ data:
     # Zwraca: vault:v1:base64-ciphertext
     
     set -e
-    export VAULT_ADDR="http://vault.davtro02.svc.cluster.local:8200"
+    export VAULT_ADDR="https://vault.davtro02.svc.cluster.local:8203"
+    export VAULT_CACERT="/etc/vault-tls/ca.crt"
     
     # Pobierz token K8s
     TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
@@ -35,7 +36,8 @@ data:
     # Zwraca: odszyfrowane dane
     
     set -e
-    export VAULT_ADDR="http://vault.davtro02.svc.cluster.local:8200"
+    export VAULT_ADDR="https://vault.davtro02.svc.cluster.local:8203"
+    export VAULT_CACERT="/etc/vault-tls/ca.crt"
     
     # Pobierz token K8s
     TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
@@ -53,7 +55,8 @@ data:
     # Zwraca: vault:v1:wrapped-key (do przechowania razem z danymi)
     
     set -e
-    export VAULT_ADDR="http://vault.davtro02.svc.cluster.local:8200"
+    export VAULT_ADDR="https://vault.davtro02.svc.cluster.local:8203"
+    export VAULT_CACERT="/etc/vault-tls/ca.crt"
     
     # Pobierz token K8s
     TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
@@ -68,7 +71,8 @@ data:
     # Użycie: vault agent -config=vault_agent_config.hcl
     
     vault {
-      address = "http://vault.davtro02.svc.cluster.local:8200"
+      address = "https://vault.davtro02.svc.cluster.local:8203"
+      tls_skip_verify = false
       retry {
         num_retries = 5
       }
@@ -107,7 +111,7 @@ metadata:
 spec:
   provider:
     vault:
-      server: "http://vault.davtro02.svc.cluster.local:8200"
+      server: "https://vault.davtro02.svc.cluster.local:8203"
       version: "v2"
       auth:
         kubernetes:

@@ -35,7 +35,7 @@ class VaultTokenProvider:
     def __init__(self):
         self.vault_addr = os.environ.get(
             "VAULT_TRANSIT_ADDR",
-            "http://vault.davtro02.svc.cluster.local:8200",
+            os.environ.get("VAULT_TRANSIT_SCHEME", "https") + "://vault.davtro02.svc.cluster.local:8203",
         )
         self.auth_role = os.environ.get(
             "VAULT_TRANSIT_AUTH_ROLE",
@@ -72,10 +72,15 @@ class TransitClient:
     def __init__(self, key_name: Optional[str] = None):
         self.vault_addr = os.environ.get(
             "VAULT_TRANSIT_ADDR",
-            "http://vault.davtro02.svc.cluster.local:8200",
+            os.environ.get("VAULT_TRANSIT_SCHEME", "https") + "://vault.davtro02.svc.cluster.local:8203",
         )
         self.key_name = key_name or os.environ.get("VAULT_TRANSIT_KEY", "davtro-app")
         self.token_provider = VaultTokenProvider()
+        # KROK 9 (Vault HTTPS): weryfikacja TLS certyfikatem CA davtro-internal
+        # (sekret vault-tls zamontowany w podzie). Przy HTTP ignorowane.
+        self.verify = os.environ.get("VAULT_TRANSIT_CA_FILE", "/etc/vault-tls/ca.crt")
+        if not os.path.exists(self.verify):
+            self.verify = True if os.environ.get("VAULT_TRANSIT_SCHEME", "https") == "https" else False
         self._session = requests.Session()
 
     def _request(self, path: str, payload: Dict[str, str]) -> Dict:
@@ -88,7 +93,7 @@ class TransitClient:
                 logger.error("Vault auth failed: %s", exc)
                 raise
             resp = self._session.post(
-                url, json=payload, headers={"X-Vault-Token": token}, timeout=30
+                url, json=payload, headers={"X-Vault-Token": token}, timeout=30, verify=self.verify
             )
             if resp.status_code == 403 and attempt == 1:
                 logger.warning("Vault 403 - odswiezam token i ponawiam")

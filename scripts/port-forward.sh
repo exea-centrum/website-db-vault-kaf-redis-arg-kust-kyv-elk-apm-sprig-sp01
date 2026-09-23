@@ -113,7 +113,7 @@ start_vault_https() {
   # Vault może byc dostępny przez HTTPS, ale domyslnie jest plain HTTP na porcie 8200.
   # W producji Vault często jest za proxy/TLS; w dev lokalnym forwardujemy 8200 (HTTP).
   # Opcjonalnie: jeśli vault endpoint jest HTTPS, forwardujemy do 8200/TLS.
-  start vault-https "$LOCAL" vault 8200
+  start vault-https "$LOCAL" vault 8203
 }
 
 # ---------------------------------------------------------
