@@ -39,6 +39,7 @@ resources:
 - ingress.yaml
 - kyverno-policy.yaml
 - pki-issuer.yaml
+- vault-server-tls.yaml
 - certificates.yaml
 - mtls-certificates.yaml
 - transit-helpers.yaml

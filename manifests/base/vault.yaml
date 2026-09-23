@@ -58,6 +58,10 @@ data:
       tls_cert_file     = "/vault/tls/tls.crt"
       tls_key_file      = "/vault/tls/tls.key"
       tls_client_ca_file = "/vault/tls/ca.crt"
+      # Klienci (ESO, transit_client, vault-snapshot, bootstrap) autoryzuja sie
+      # tokenem/Kubernetes auth, a NIE certyfikatem klienta. Bez tej flagi ustawione
+      # tls_client_ca_file moze wymuszac cert klienta -> "certificate required".
+      tls_disable_client_certs = true
       tls_min_version   = "tls12"
     }
     telemetry {
