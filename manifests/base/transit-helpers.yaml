@@ -113,6 +113,13 @@ spec:
     vault:
       server: "https://vault.davtro02.svc.cluster.local:8203"
       version: "v2"
+      # KROK 9 (Vault HTTPS): bez caProvider store nie ufa self-signed
+      # vault-ca -> 'x509: certificate signed by unknown authority'
+      # i SecretStore vault-transit stawal Degraded (blokowal sync ArgoCD).
+      caProvider:
+        type: Secret
+        name: vault-tls
+        key: ca.crt
       auth:
         kubernetes:
           mountPath: "kubernetes"
