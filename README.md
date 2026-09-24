@@ -1066,14 +1066,41 @@ Certy `davtro-tls` podpisuje Vault PKI przez cert-manager i sam je renewuje; w p
 # KROK 9 – Vault HTTPS (TLS :8203, dual-listener)
 
 - **Serwer** (`vault.yaml`): drugi listener `tcp` na 8203 z TLS (`tls_cert_file=/vault/tls/tls.crt`, min TLS 1.2). HTTP :8200 zostaje jako fallback bootstrapu + metryki; Service ma port `https 8203`.
-- **Certyfikat** (`mtls-certificates.yaml`): `Certificate/vault-tls` z wewnetrznego PKI (`vault-issuer-internal`), CN `vault.davtro02.svc` + SAN-y (vault, vault-0..., localhost-brak). Renew automatyczny co 7 dni. Sekret `vault-tls` zawiera `tls.crt/tls.key/ca.crt`.
+- **Certyfikat SERWERA Vaulta** (`vault-server-tls.yaml`) — **NIE z Vault PKI!** Cert-manager podpisuje przez Vault PKI (`pki/sign/...`), czyli musi najpierw połączyć się z działającym Vaultem, a Vault bez własnego certyfikatu nie wstaje z listenerem TLS — błędne koło. Rozwiązanie: własne bootstrapowe CA (`Issuer vault-selfsigned` → `Certificate vault-ca` isCA, 10 lat, `rotationPolicy: Never`) → `Issuer vault-ca` → `Certificate vault-tls` (CN `vault.davtro02.svc` + SAN-y `vault.davtro02.svc`, `vault.davtro02.svc.cluster.local`, `vault`, `vault-0...vault-5`). Sekret `vault-tls` zawiera `tls.crt`/`tls.key`/`ca.crt`. Sekret istnieje **zanim** Vault wystartuje, a długie TTL + `rotationPolicy: Never` = stabilne zaufanie przy rotacji liścia. Certy usług wewnętrznych (mTLS fastapi/spring, Ingress) **dalej** wystawia PKI Vaulta (`pki/davtro-internal`) — bootstrapowe CA służy wyłącznie do TLS servera Vaulta.
 - **Klienci przelaczeni na `https://vault.davtro02.svc.cluster.local:8203`:**
   - ESO: `secret-store.yaml` (2 store'y), `external-secrets-db-dynamic.yaml` (VaultDynamicSecret) - `caProvider` typ Secret `vault-tls` key `ca.crt` (CA czytane z sekretu, nic w Git).
   - FastAPI: `deployment.yaml` - env `VAULT_TRANSIT_ADDR=https...:8203`, `VAULT_TRANSIT_CA_FILE=/etc/vault-tls/ca.crt`, mount `vault-tls`; `transit_client.py` weryfikuje CA (fail-safe: bez certu fallback plaintext z logiem, jak KROK 4).
   - Spring + message-processor: te same env + mount (po stronie kodu Java wymaga wsparcia CA_FILE - do weryfikacji przy wdrozeniu).
-  - transit-helpers (skrypty vault CLI): `VAULT_ADDR=https...:8203` + `VAULT_CACERT=/etc/vault-tls/ca.crt`.
+  - transit-helpers (`transit-helpers.yaml`): `SecretStore/vault-transit` — `VAULT_ADDR`/`server: https://vault.davtro02.svc.cluster.local:8203` + `caProvider { type: Secret, name: vault-tls, key: ca.crt }` (ten sam mechanizm co ESO, sekret CA czytany z K8s, nic w Git).
   - Snapshot CronJob: `VAULT_ADDR=https...:8203` + `VAULT_CACERT` + mount.
 - **Celowo na HTTP:8200 zostaja**: cert-manager ClusterIssuery (caBundle wymagalby CA generowanego dopiero przez bootstrap - niemozliwe w Git; finalny etap migracji), bootstrap (first-boot przed wystawieniem certu), scrape metryk.
 - Zero przestoju: dual-listener, pod Vaulta podmienia cert w wolumenie automatycznie (kubelet), ESO/APP bledy w oknie przed wystawieniem certu self-heal (retry).
 - Test: `./scripts/port-forward.sh https-vault 8243` (forward do :8203 TLS) -> `vault status` z `VAULT_CACERT=/etc/vault-tls/ca.crt` albo przegladarka (self-signed CA).
 - Finalny etap (po potwierdzeniu dzialania TLS): wylaczyc listener 8200, przelaczyc ClusterIssuery na 8203 + caBundle, zaktualizowac `VAULT_API_ADDR/CLUSTER_ADDR` na https.
+
+### Pułapki przy wdrożeniu TLS Vaulta (dwie z nich wywróciły klaster)
+
+1. **NetworkPolicy `allow-eso-to-vault` musi przepuszczać TCP 8203** (`network-policies.yaml`).
+   Po przełączeniu klientów na `:8203` samo `namespaceSelector` na `:8200/8201` było za mało —
+   ESO dostawał `context deadline exceeded` (policy `default-deny` odrzucała połączenie), więc
+   `davtro-secrets` nie powstawał i kaskada: pody postgres / alertmanager / pgadmin / spring-app /
+   postgres-exporter / fastapi wpadały w `CreateContainerConfigError` (brakujący secret) lub `CrashLoopBackOff`.
+2. **Każdy store wskazujący na `https://...:8203` musi mieć `caProvider`** wskazujący na sekret `vault-tls`, klucz `ca.crt`
+   (`secret-store.yaml` ×2, `transit-helpers.yaml` → `SecretStore/vault-transit`).
+   Bez tego: `x509: certificate signed by unknown authority` → `SecretStore` = `Degraded`.
+3. **Pułapka GitOps**: obie poprawki były już w `main`, ale `vault-transit` bez `caProvider` blokował
+   `argocd` sync (`Failed` po 5 retryach) → ArgoCD nigdy nie dostarczył poprawek do klastra,
+   a live namespace pozostawał stary (tzw. GitOps deadlock: błąd w sync nie da się naprawić przez sync).
+   Rozwiązanie tymczasowe: ręczny `kubectl apply` plików, aż ArgoCD wróci do `Synced/Healthy`.
+4. **`namespaceSelector` bez `podSelector`** w elemencie `from` — kombinacja obu w jednym elemencie to AND,
+   czyli wymagałaby podu będącego jednocześnie w ns ESO i ns target; stąd dwa osobne elementy `from`.
+
+**Status weryfikacji (live, ns `davtro02`)**: ArgoCD `davtro-website` = `Synced/Healthy`; wszystkie pody `Running/Completed`;
+`SecretStore` `vault-backend` / `vault-dynamic` / `vault-transit` = `Valid=True`; wszystkie `ExternalSecret` = `SecretSynced=True`;
+`Certificate vault-tls` i `vault-ca` = `True`. Sprawdzenie TLS od strony poda:
+
+```bash
+kubectl -n davtro02 exec vault-0 -- vault status \
+  -address=https://127.0.0.1:8203 -cacert=/vault/tls/ca.crt
+```
+
