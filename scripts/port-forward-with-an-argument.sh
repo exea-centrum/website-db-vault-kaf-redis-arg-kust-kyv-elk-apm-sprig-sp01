@@ -45,7 +45,7 @@ echo "Port-forwarding uslug DavTro na $ADDR ... (kubectl: $KC, namespace: $NS)"
 #   pgAdmin     5050 -> pgadmin:80
 #   PostgreSQL  5432 -> postgres-clusterip:5432
 #   Redis       6379 -> redis:6379
-#   Vault       8200 -> vault:8200
+#   Vault       8243 -> vault:8203 (HTTPS; CA: davtro02/vault-tls)
 #   Spark       7077 -> spark-master-svc:7077
 #   Kafka       9092 -> kafka-kraft:9092
 #   Kafka Exp   9308 -> kafka-exporter:9308
@@ -223,7 +223,7 @@ EOF
 #   ./scripts/port-forward.sh https-fastapi   8443   -> https://<IP>:8443 (Ingress, davtro-tls)
 #   ./scripts/port-forward.sh https-frontend  8444   -> https://<IP>:8444 (Ingress, davtro-tls)
 #   ./scripts/port-forward.sh https-spring    8445   -> https://<IP>:8445 (Ingress)
-#   ./scripts/port-forward.sh https-vault     8243   -> http://<IP>:8243  (Vault plain HTTP)
+#   ./scripts/port-forward.sh https-vault     8243   -> https://<IP>:8243 (Vault TLS)
 #   ./scripts/port-forward.sh https-all              -> 8443/8444/8445/8243 razem (wait)
 #   ./scripts/port-forward.sh extract-tls fastapi-mtls /tmp/fastapi
 #   ./scripts/port-forward.sh make-pfx   fastapi-mtls /tmp/fastapi.pfx "Haslo123" "fastapi client"
@@ -261,12 +261,12 @@ case "${1:-}" in
   https-fastapi)  start_https_ingress fastapi  "${2:-8443}" davtro-ingress; exit 0 ;;
   https-frontend) start_https_ingress frontend "${2:-8444}" davtro-ingress; exit 0 ;;
   https-spring)   start_https_ingress spring   "${2:-8445}" davtro-ingress; exit 0 ;;
-  https-vault)    start vault-https "${2:-8243}" vault 8200; exit 0 ;;
+  https-vault)    start vault-https "${2:-8243}" vault 8203; exit 0 ;;
   https-all)
     start_https_ingress fastapi  "${2:-8443}" davtro-ingress
     start_https_ingress frontend "${3:-8444}" davtro-ingress
     start_https_ingress spring   "${4:-8445}" davtro-ingress
-    start vault-https "${5:-8243}" vault 8200
+    start vault-https "${5:-8243}" vault 8203
     echo
     echo "Wszystkie forwardy HTTPS odpalone. Ctrl+C aby zakonczyc."
     wait
@@ -303,7 +303,7 @@ start prometheus  9090 prometheus          9090
 start pgadmin     5050 pgadmin             80
 start postgres    5432 postgres-clusterip  5432
 start redis       6379 redis               6379
-start vault       8200 vault               8200
+start vault       8243 vault               8203
 start spark       7077 spark-master-svc    7077
 start kafka       9092 kafka-kraft         9092
 start kafka-exp   9308 kafka-exporter      9308
@@ -319,8 +319,8 @@ echo "# Frontend-HTTPS przez davtro-ingress:"
 echo "#   $0 https-frontend 8444  (uruchomi: port-forward svc/davtro-ingress 8444:443)"
 echo "# Spring-HTTPS przez davtro-ingress:"
 echo "#   $0 https-spring 8445    (uruchomi: port-forward svc/davtro-ingress 8445:443)"
-echo "# Vault-HTTPS (jesli Vault TLS wlaczony):"
-echo "#   $0 https-vault 8243     (uruchomi: port-forward svc/vault 8243:8200)"
+echo "# Vault-HTTPS:"
+echo "#   $0 https-vault 8243     (uruchomi: port-forward svc/vault 8243:8203)"
 echo "# Wszystko naraz (zostaje w foreground, Ctrl+C konczy):"
 echo "#   $0 https-all"
 echo

@@ -38,11 +38,7 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: external-secrets
       ports:
-        - { protocol: TCP, port: 8200 }
-        - { protocol: TCP, port: 8201 }
-        # KROK 9 (Vault HTTPS): ESO laczy sie z :8203 (TLS). Bez tej reguly
-        # default-deny zjadal ruch ESO -> SecretStore 'context deadline exceeded'
-        # -> sekrety nie powstawaly, pody padaly z 'secret not found'.
+        # KROK 10: ESO komunikuje sie z Vaultem wylacznie po TLS.
         - { protocol: TCP, port: 8203 }
   policyTypes: [Ingress]
 ---
@@ -109,8 +105,8 @@ spec:
         - { protocol: TCP, port: 8080 }
   policyTypes: [Ingress]
 ---
-# KROK 5 (PKI): cert-manager (ns cert-manager) musi dobic do Vaulta :8200
-# (ClusterIssuer/vault-issuer sklada CSR przez pki/sign/davtro-ingress).
+# KROK 5/10 (PKI): kontroler cert-manager (ns cert-manager) musi dobic
+# do API Vaulta po HTTPS :8203 (ClusterIssuer sklada CSR przez pki/sign/*).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -126,5 +122,5 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: cert-manager
       ports:
-        - { protocol: TCP, port: 8200 }
+        - { protocol: TCP, port: 8203 }
   policyTypes: [Ingress]

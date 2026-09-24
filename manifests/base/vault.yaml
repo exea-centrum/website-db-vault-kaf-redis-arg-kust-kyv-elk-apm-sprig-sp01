@@ -1,9 +1,15 @@
-# Vault - tryb produkcyjny: storage raft na PV (dane trwale), UI, telemetria Prometheus.
-# Po restarcie poda Vault jest SEALED - wymagany reczny unseal (klucze NIE sa w K8s/Git).
+# Vault - storage raft na PV, API wyłącznie przez TLS (:8203), UI i telemetria.
+# Cert `vault-tls` jest wystawiany przez bootstrapowe CA cert-managera
+# (`vault-server-tls.yaml`) i MUSI istnieć przed uruchomieniem poda. Nie ma już
+# fallbacku HTTP :8200 — brak certyfikatu oznacza oczekiwanie kubeleta, nie
+# uruchomienie niezabezpieczonego API.
 #
 # RUNBOOK pierwszego uruchomienia (jednorazowo):
-#   kubectl -n davtro02 port-forward vault-0 8200:8200 &
-#   export VAULT_ADDR=http://127.0.0.1:8200
+#   kubectl -n davtro02 port-forward vault-0 8243:8203 &
+#   export VAULT_ADDR=https://127.0.0.1:8243
+#   kubectl -n davtro02 get secret vault-tls -o jsonpath='{.data.ca\.crt}' \
+#     | base64 -d > /tmp/vault-ca.crt
+#   export VAULT_CACERT=/tmp/vault-ca.crt
 #   vault operator init -key-shares=1 -key-threshold=1
 #     -> zapisz unseal_key i root_token POZA repozytorium (menedzer hasel)!
 #   vault operator unseal <unseal_key>
@@ -21,46 +27,22 @@ metadata:
   name: vault-config
   namespace: davtro02
 data:
-  config.hcl: |
-    disable_mlock = true
-    ui = true
-    storage "raft" {
-      path    = "/vault/data"
-      node_id = "vault-0"
-    }
-    listener "tcp" {
-      address         = "0.0.0.0:8200"
-      cluster_address = "0.0.0.0:8201"
-      tls_disable     = true   # KROK 9: zostaje jako fallback (bootstrap przy pierwszym starcie
-                               # jeszcze nie ma certu) + metryki scrape; docelowo do wylaczenia
-    }
-    # KROK 9: TLS listener jest w config-tls.hcl (start.sh wybiera config wg
-    # dostepnosci certu - rozwiazuje klero-wajke: cert wymaga dzialajacego Vaulta).
-    telemetry {
-      prometheus_retention = "12h"
-    }
   config-tls.hcl: |
-    # KROK 9: dual-listener - plain 8200 (bootstrap/fallback/metryki) + TLS 8203.
+    # KROK 10: API wylacznie po TLS. 8201 pozostaje zarezerwowany przez Vault
+    # jako cluster_address (replikacja Raft; pojedynczy node go nie uzywa).
     disable_mlock = true
     ui = true
     storage "raft" {
       path    = "/vault/data"
       node_id = "vault-0"
-    }
-    listener "tcp" {
-      address         = "0.0.0.0:8200"
-      cluster_address = "0.0.0.0:8201"
-      tls_disable     = true
     }
     listener "tcp" {
       address         = "0.0.0.0:8203"
-      cluster_address = "0.0.0.0:8202"
+      cluster_address = "0.0.0.0:8201"
       tls_cert_file     = "/vault/tls/tls.crt"
       tls_key_file      = "/vault/tls/tls.key"
       tls_client_ca_file = "/vault/tls/ca.crt"
-      # Klienci (ESO, transit_client, vault-snapshot, bootstrap) autoryzuja sie
-      # tokenem/Kubernetes auth, a NIE certyfikatem klienta. Bez tej flagi ustawione
-      # tls_client_ca_file moze wymuszac cert klienta -> "certificate required".
+      # Klienci autoryzuja sie tokenem/Kubernetes auth, a nie certyfikatem klienta.
       tls_disable_client_certs = true
       tls_min_version   = "tls12"
     }
@@ -68,22 +50,15 @@ data:
       prometheus_retention = "12h"
     }
   start.sh: |
-    #!/bin/sh
-    # KROK 9: wybiera config wg dostepnosci certu. Cert `vault-tls` pochodzi z
-    # DEDYKOWANEGO CA cert-managera (vault-server-tls.yaml), a NIE z Vault PKI,
-    # wiec istnieje ZANIM Vault wystartuje - bledne kolo nie powstaje i ten
-    # warunek wybiera TLS od pierwszego startu. Fallback plain :8200 obsluguje
-    # tylko jednorazowa migracje istniejacej instalacji (brak sekretu vault-tls).
-    # Marker /tmp/tls-enabled czyta vault-bootstrap (jednorazowy restart migracyjny).
-    if [ -f /vault/tls/tls.crt ] && [ -f /vault/tls/tls.key ]; then
-      echo "Vault: TLS listener :8203 wlaczony (cert z dedykowanego CA cert-managera)"
-      cp /vault/config/config-tls.hcl /tmp/vault.hcl
-      touch /tmp/tls-enabled
-    else
-      echo "Vault: brak certu (secret vault-tls) - start plain :8200 (bootstrap wystawi cert)"
-      cp /vault/config/config.hcl /tmp/vault.hcl
-    fi
-    exec vault server -config=/tmp/vault.hcl
+    # Secret vault-tls jest niewymaganym? NIE: od KROK 10 jest obowiazkowy.
+    # Kubelet utrzymuje kontener w stanie ContainerCreating do chwili utworzenia
+    # sekretu przez cert-manager. Po jego pojawieniu Vault startuje tylko na TLS.
+    set -eu
+    test -s /vault/tls/tls.crt
+    test -s /vault/tls/tls.key
+    test -s /vault/tls/ca.crt
+    echo "Vault: start TLS :8203 (cert z bootstrapowego CA cert-managera)"
+    exec vault server -config=/vault/config/config-tls.hcl
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -128,25 +103,28 @@ spec:
           image: hashicorp/vault:1.17
           command: ["sh", "/vault/config/start.sh"]
           ports:
-            - { containerPort: 8200, name: http }
-            - { containerPort: 8201, name: internal }
+            - { containerPort: 8201, name: raft }
+            - { containerPort: 8203, name: https }
           env:
             - name: VAULT_API_ADDR
-              value: http://vault-0.vault.davtro02.svc.cluster.local:8200
+              value: https://vault-0.vault.davtro02.svc.cluster.local:8203
             - name: VAULT_CLUSTER_ADDR
+              # 8201 pozostaje niezmieniony: wewnetrzny channel Raft, nie API.
               value: http://vault-0.vault.davtro02.svc.cluster.local:8201
           readinessProbe:
             # sealedcode=200 + standbyok: pod gotowy tez przed init/unseal
             # (single-node - bez unseala i tak nie obsluzy ruchu)
             httpGet:
               path: "/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=204"
-              port: 8200
+              port: 8203
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: "/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=204"
-              port: 8200
+              port: 8203
+              scheme: HTTPS
             initialDelaySeconds: 30
             periodSeconds: 20
           volumeMounts:
@@ -163,9 +141,10 @@ spec:
       volumes:
         - name: config
           configMap: { name: vault-config }
-        # optional: cert moze jeszcze nie istniec przy pierwszym starcie (klero-wajka)
+        # vault-tls jest obowiazkowy: bez niego kubelet nie uruchamia kontenera.
+        # Dzieki temu nie istnieje moment, w ktorym Vault wystawia API po HTTP.
         - name: vault-tls
-          secret: { secretName: vault-tls, optional: true }
+          secret: { secretName: vault-tls }
   volumeClaimTemplates:
     - metadata: { name: vault-data }
       spec:
@@ -180,6 +159,6 @@ metadata:
 spec:
   selector: { app: vault }
   ports:
-    - { name: http, port: 8200, targetPort: 8200 }
-    - { name: internal, port: 8201, targetPort: 8201 }
+    # 8200 celowo nie istnieje: API jest wylacznie na TLS.
+    - { name: raft, port: 8201, targetPort: 8201 }
     - { name: https, port: 8203, targetPort: 8203 }

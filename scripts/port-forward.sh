@@ -42,7 +42,7 @@ echo "Port-forwarding uslug DavTro na $ADDR ... (kubectl: $KC)"
 #   pgAdmin     5050 -> pgadmin:80
 #   PostgreSQL  5432 -> postgres-clusterip:5432
 #   Redis       6379 -> redis:6379
-#   Vault       8200 -> vault:8200
+#   Vault       8243 -> vault:8203 (HTTPS; CA w sekrecie davtro02/vault-tls)
 #   Spark       7077 -> spark-master-svc:7077
 #   Kafka       9092 -> kafka-kraft:9092
 #   Kafka Exp   9308 -> kafka-exporter:9308
@@ -51,9 +51,9 @@ echo "Port-forwarding uslug DavTro na $ADDR ... (kubectl: $KC)"
 # ---------------------------------------------------------
 
 start() {
-  local NAME="$1" LOCAL="$2" SVC="$3" TARGET="$4"
+  local NAME="$1" LOCAL="$2" SVC="$3" TARGET="$4" SCHEME="${5:-http}"
   $KC port-forward --address "$ADDR" -n davtro02 "svc/$SVC" "$LOCAL:$TARGET" >"/tmp/pf-$NAME.log" 2>&1 &
-  echo "  $NAME: http://<IP>:${LOCAL}/  -> $SVC:$TARGET"
+  echo "  $NAME: $SCHEME://<IP>:${LOCAL}/  -> $SVC:$TARGET"
 }
 
 # ---------------------------------------------------------
@@ -110,10 +110,8 @@ start_spring_https() {
 
 start_vault_https() {
   local LOCAL="$1"
-  # Vault może byc dostępny przez HTTPS, ale domyslnie jest plain HTTP na porcie 8200.
-  # W producji Vault często jest za proxy/TLS; w dev lokalnym forwardujemy 8200 (HTTP).
-  # Opcjonalnie: jeśli vault endpoint jest HTTPS, forwardujemy do 8200/TLS.
-  start vault-https "$LOCAL" vault 8203
+  # Vault od KROK 10 nie udostepnia HTTP :8200; jedynym API jest TLS :8203.
+  start vault-https "$LOCAL" vault 8203 https
 }
 
 # ---------------------------------------------------------
@@ -122,7 +120,7 @@ start_vault_https() {
 #   ./scripts/port-forward.sh https-fastapi  8443  -> https://<IP>:8443 (Ingress, davtro-tls)
 #   ./scripts/port-forward.sh https-frontend 8444  -> https://<IP>:8444 (Ingress, davtro-tls)
 #   ./scripts/port-forward.sh https-spring   8445  -> https://<IP>:8445 (Ingress)
-#   ./scripts/port-forward.sh https-vault    8243  -> http://<IP>:8243 (Vault plain HTTP)
+#   ./scripts/port-forward.sh https-vault    8243  -> https://<IP>:8243 (Vault TLS :8203)
 # Certyfikaty davtro-tls podpisuje Vault PKI przez cert-manager i SAM je renewuje
 # przed TTL (duration 90d, renewBefore 15d) - sekret tls.crt/tls.key podmienia sie
 # sam; w przegladarce zaakceptuj self-signed CA przy pierwszym wejsciu.
@@ -149,7 +147,7 @@ start prometheus  9090 prometheus          9090
 start pgadmin     5050 pgadmin             80
 start postgres    5432 postgres-clusterip  5432
 start redis       6379 redis               6379
-start vault       8200 vault               8200
+start vault       8243 vault               8203
 start spark       7077 spark-master-svc    7077
 start kafka       9092 kafka-kraft         9092
 start kafka-exp   9308 kafka-exporter      9308
@@ -166,8 +164,8 @@ echo "# Frontend-HTTPS przez davtro-ingress:"
 echo "#   $0 https-frontend 8444  (uruchomi: port-forward svc/davtro-ingress 8444:443)"
 echo "# Spring-HTTPS przez davtro-ingress:"
 echo "#   $0 https-spring 8445    (uruchomi: port-forward svc/davtro-ingress 8445:443)"
-echo "# Vault-HTTPS (jeśli Vault TLS włączony):"
-echo "#   $0 https-vault 8243     (uruchomi: port-forward svc/vault 8243:8200)"
+echo "# Vault-HTTPS (TLS, KROK 10):"
+echo "#   $0 https-vault 8243     (uruchomi: port-forward svc/vault 8243:8203)"
 echo
 echo "=== mTLS / client-cert ==="
 echo "# Secrety TLS/mTLS w davtro02: fastapi-mtls, message-processor-mtls, spring-app-mtls"

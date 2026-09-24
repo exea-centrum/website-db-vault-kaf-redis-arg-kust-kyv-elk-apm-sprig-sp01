@@ -60,7 +60,7 @@ chmod 700 "$CTR_DIR"
 #   pgAdmin     5050 -> pgadmin:80
 #   PostgreSQL  5432 -> postgres-clusterip:5432
 #   Redis       6379 -> redis:6379
-#   Vault       8200 -> vault:8200
+#   Vault       8243 -> vault:8203 (HTTPS; CA: davtro02/vault-tls)
 #   Spark       7077 -> spark-master-svc:7077
 #   Kafka       9092 -> kafka-kraft:9092
 #   Kafka Exp   9308 -> kafka-exporter:9308
@@ -266,12 +266,12 @@ case "${1:-}" in
   https-fastapi)  start_https_ingress fastapi  "${2:-8443}" davtro-ingress; exit 0 ;;
   https-frontend) start_https_ingress frontend "${2:-8444}" davtro-ingress; exit 0 ;;
   https-spring)   start_https_ingress spring   "${2:-8445}" davtro-ingress; exit 0 ;;
-  https-vault)    start vault-https "${2:-8243}" vault 8200; exit 0 ;;
+  https-vault)    start vault-https "${2:-8243}" vault 8203; exit 0 ;;
   https-all)
     start_https_ingress fastapi  "${2:-8443}" davtro-ingress
     start_https_ingress frontend "${3:-8444}" davtro-ingress
     start_https_ingress spring   "${4:-8445}" davtro-ingress
-    start vault-https "${5:-8243}" vault 8200
+    start vault-https "${5:-8243}" vault 8203
     wait
     exit 0
     ;;
@@ -310,7 +310,7 @@ start prometheus  9090 prometheus          9090
 start pgadmin     5050 pgadmin             80
 start postgres    5432 postgres-clusterip  5432
 start redis       6379 redis               6379
-start vault       8200 vault               8200
+start vault       8243 vault               8203
 start spark       7077 spark-master-svc    7077
 start kafka       9092 kafka-kraft         9092
 start kafka-exp   9308 kafka-exporter      9308

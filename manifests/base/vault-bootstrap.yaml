@@ -149,7 +149,10 @@ spec:
         - name: ensure
           image: hashicorp/vault:1.17
           env:
-            - { name: VAULT_ADDR, value: "http://vault.davtro02.svc.cluster.local:8200" }
+            - name: VAULT_ADDR
+              value: "https://vault.davtro02.svc.cluster.local:8203"
+            - name: VAULT_CACERT
+              value: "/etc/vault-tls/ca.crt"
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -160,7 +163,7 @@ spec:
 
               ensure_one() {
                 n=0
-                until wget -q -O /dev/null "http://vault:8200/v1/sys/health?sealedcode=200&standbyok=true&uninitcode=200"; do
+                until vault status -format=json >/dev/null 2>&1; do
                   n=$((n + 1)); [ "$n" -ge 20 ] && return 1
                   sleep 3
                 done
@@ -281,22 +284,9 @@ spec:
                 fi
                 log "schemat bookings: kolumny user_id/username potwierdzone (automat)"
 
-                # KROK 9 (Vault HTTPS): od czasu dedykowanego CA cert-managera
-                # (vault-server-tls.yaml) secret `vault-tls` istnieje ZANIM Vault
-                # wystartuje, wiec start.sh od razu wybiera config z TLS (:8203) i
-                # bledne kolo nie powstaje. Ten blok obsluguje tylko JEDNORAZOWA
-                # MIGRACJE: Vault dziala jeszcze bez TLS (marker /tmp/tls-enabled
-                # brak), a cert juz jest -> restart. Warunek gotowosci poda chroni
-                # przed petla restartow, gdy Vault jeszcze nie wstal.
-                if $KUBECTL -n davtro02 get secret vault-tls >/dev/null 2>&1; then
-                  VAULT_READY=$($KUBECTL -n davtro02 get pod vault-0 -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null)
-                  if [ "$VAULT_READY" = "true" ] && ! $KUBECTL -n davtro02 exec vault-0 -- test -f /tmp/tls-enabled >/dev/null 2>&1; then
-                    log "cert vault-tls istnieje, Vault dziala bez TLS - restart (wlaczenie :8203)"
-                    $KUBECTL -n davtro02 rollout restart statefulset/vault >/dev/null 2>&1 || true
-                    log "restart Vaulta zlecony - koncze iteracje (kolejna sprawdzi TLS)"
-                    return 1
-                  fi
-                fi
+                # KROK 10: nie ma juz migracji z plain listenera. Secret
+                # vault-tls jest montowany jako wymagany, a ConfigMap ma tylko
+                # konfiguracje TLS :8203; nie wykonujemy dodatkowego restartu.
 
                 vault write database/roles/davtro-app-rw \
                   db_name=davtro-postgresql \
@@ -385,6 +375,7 @@ spec:
             - { name: vault-data, mountPath: /vault/data }
             - { name: sql, mountPath: /sql, readOnly: true }
             - { name: tools, mountPath: /share, readOnly: true }
+            - { name: vault-tls, mountPath: /etc/vault-tls, readOnly: true }
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { cpu: 250m, memory: 256Mi }
@@ -397,3 +388,5 @@ spec:
             name: vault-bootstrap-sql
         - name: tools
           emptyDir: {}
+        - name: vault-tls
+          secret: { secretName: vault-tls }

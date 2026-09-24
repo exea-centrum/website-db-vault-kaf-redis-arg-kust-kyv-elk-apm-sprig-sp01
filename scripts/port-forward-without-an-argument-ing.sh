@@ -343,12 +343,12 @@ case "${1:-}" in
   https-fastapi)  start_https_ingress fastapi  "${2:-8443}"; exit 0 ;;
   https-frontend) start_https_ingress frontend "${2:-8444}"; exit 0 ;;
   https-spring)   start_https_ingress spring   "${2:-8445}"; exit 0 ;;
-  https-vault)    start vault "${2:-8243}" vault 8200; exit 0 ;;
+  https-vault)    start vault "${2:-8243}" vault 8203; exit 0 ;;
   https-all)
     start_https_ingress fastapi  "${2:-8443}"
     start_https_ingress frontend "${3:-8444}"
     start_https_ingress spring   "${4:-8445}"
-    start vault "${5:-8243}" vault 8200
+    start vault "${5:-8243}" vault 8203
     echo
     echo "Wszystkie forwardy HTTPS odpalone. Ctrl+C konczy."
     wait
@@ -389,7 +389,7 @@ start prometheus  9090 prometheus          9090
 start pgadmin     5050 pgadmin             80
 start postgres    5432 postgres-clusterip  5432
 start redis       6379 redis               6379
-start vault       8200 vault               8200
+start vault       8243 vault               8203
 start spark       7077 spark-master-svc    7077
 start kafka       9092 kafka-kraft         9092
 start kafka-exp   9308 kafka-exporter      9308
