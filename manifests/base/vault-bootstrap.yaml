@@ -161,16 +161,32 @@ spec:
               log() { echo "[bootstrap] $*"; }
               vfield() { grep -o "$1" | grep -o '[a-z]*$'; }
 
+              # vault status zwraca exit 2 dla statusu "sealed" (to nie jest blad
+              # sieciowy). Petla uzywa exit code jako testu "Vault odpowiada", wiec
+              # kod 2 traktujemy jak sukces. Tylko brak odpowiedzi jest bledem.
+              read_status() {
+                STATUS_ERR=$(mktemp /tmp/vault-status.XXXXXX)
+                vault status -format=json >"$STATUS_ERR" 2>&1
+                STATUS_RC=$?
+                STATUS=$(cat "$STATUS_ERR" 2>/dev/null || printf '{}')
+                rm -f "$STATUS_ERR"
+                [ "$STATUS_RC" -eq 0 ] || [ "$STATUS_RC" -eq 2 ]
+              }
+
               ensure_one() {
                 n=0
-                until vault status -format=json >/dev/null 2>&1; do
-                  n=$((n + 1)); [ "$n" -ge 20 ] && return 1
+                while ! read_status; do
+                  n=$((n + 1))
+                  if [ "$n" -ge 20 ]; then
+                    log "Vault nie odpowiada przez TLS (ostatni rc=$STATUS_RC): $STATUS"
+                    return 1
+                  fi
                   sleep 3
                 done
 
-                STATUS=$(vault status -format=json 2>/dev/null || echo '{}')
                 INIT=$(echo "$STATUS" | vfield '"initialized": *[a-z]*')
                 SEALED=$(echo "$STATUS" | vfield '"sealed": *[a-z]*')
+                [ -n "$INIT" ] || { log "nieparsowalny status Vaulta: $STATUS"; return 1; }
 
                 if [ "$INIT" != "true" ]; then
                   log "brak inicjalizacji -> vault operator init"
@@ -190,14 +206,18 @@ spec:
                 fi
                 [ -f "$KEYS" ] || { log "brak $KEYS (Vault inicjalizowany recznie) - patrz README: Jednorazowa migracja"; return 1; }
 
-                SEALED=$(vault status -format=json 2>/dev/null | vfield '"sealed": *[a-z]*')
+                SEALED=$(echo "$STATUS" | vfield '"sealed": *[a-z]*')
                 if [ "$SEALED" = "true" ]; then
                   log "unseal"
                   vault operator unseal "$(head -n1 "$KEYS")" >/dev/null
                 fi
                 export VAULT_TOKEN="$(tail -n1 "$KEYS")"
+                if [ -z "$VAULT_TOKEN" ] || ! vault token lookup -format=json >/dev/null 2>&1; then
+                  log "root token z $KEYS jest pusty lub nieaktualny - konfiguracja wstrzymana"
+                  return 1
+                fi
                 n=0
-                until [ "$(vault status -format=json 2>/dev/null | vfield '"sealed": *[a-z]*')" = "false" ]; do
+                until read_status && [ "$(echo "$STATUS" | vfield '"sealed": *[a-z]*')" = "false" ]; do
                   n=$((n + 1)); [ "$n" -ge 30 ] && { log "vault nadal sealed - retry"; return 1; }
                   sleep 2
                   vault operator unseal "$(head -n1 "$KEYS")" >/dev/null 2>&1 || true

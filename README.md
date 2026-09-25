@@ -1080,7 +1080,21 @@ Certy `davtro-tls` podpisuje Vault PKI przez cert-manager i sam je renewuje; w p
   - `ClusterIssuer/vault-issuer` i `vault-issuer-internal` używają HTTPS :8203 oraz `inject-ca-from-secret: davtro02/vault-ca`; cainjector aktualizuje `caBundle` po zmianie CA.
   - NetworkPolicy przepuszcza do Vaulta tylko TCP 8203 dla ESO i cert-managera.
   - Dostęp lokalny: `./scripts/port-forward.sh https-vault 8243` (forward 8243 → 8203), z CA z `vault-tls`.
-### Pułapki przy wdrożeniu TLS Vaulta (dwie z nich wywróciły klaster)
+### Automatyczne odblokowanie po restarcie Vaulta
+
+Bootstrap (`vault-bootstrap.yaml`) działa jako Deployment z pętlą co 60 s i automatycznie wykonuje `vault operator unseal` przy stanie `sealed=true`. Ważne: `vault status` zwraca kod wyjścia `2` dla zapieczętowanego Vaulta — jest to prawidłowa odpowiedź, nie błąd połączenia. Skrypt `read_status` traktuje kody `0` i `2` jako odpowiedź serwera, a dopiero inne kody jako błąd TLS/sieci.
+
+Po odblokowaniu bootstrap sprawdza token z `/vault/data/bootstrap-keys` przez `vault token lookup`. Jeżeli token jest pusty lub nieaktualny, nie wykonuje dalszej konfiguracji i zapisuje konkretny komunikat zamiast ogólnego `BLAD`.
+
+Aby wymusić ponowienie pętli po wdrożeniu poprawki:
+
+```bash
+kubectl -n davtro02 rollout restart deployment/vault-bootstrap
+kubectl -n davtro02 logs deployment/vault-bootstrap -c ensure --tail=50
+```
+
+W prawidłowym stanie log powinien zawierać `OK - nastepny check za 60s`. Plik `bootstrap-keys` ma pozostać na PVC `vault-data-vault-0`; nie należy go usuwać ani ponownie inicjalizować Vaulta.
+
 
 1. **NetworkPolicy `allow-eso-to-vault` musi przepuszczać TCP 8203** (`network-policies.yaml`).
    Po przełączeniu klientów na `:8203` samo `namespaceSelector` na `:8200/8201` było za mało —
