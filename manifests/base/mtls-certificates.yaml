@@ -14,7 +14,7 @@ spec:
   commonName: fastapi-web-app.davtro02.svc
   dnsNames:
     - fastapi-web-app.davtro02.svc
-    - fastapi-web-app.davtro02.svc.cluster.local1
+    - fastapi-web-app.davtro02.svc.cluster.local
     - fastapi-web-app-svc.davtro02.svc
     - fastapi-web-app-svc.davtro02.svc.cluster.local
   privateKey:

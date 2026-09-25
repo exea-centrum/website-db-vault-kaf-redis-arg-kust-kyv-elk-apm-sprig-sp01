@@ -17,10 +17,56 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      # KROK 11 (Kafka SSL) - DLACZEGO initContainer z openssl:
+      # obraz apache/kafka:3.7.0 w /etc/kafka/docker/configure (blok "SSL is enabled.")
+      # wymaga KEYSTORE/TRUSTSTORE z plikow w /etc/kafka/secrets oraz plikow z haslami:
+      #   KAFKA_SSL_KEYSTORE_FILENAME, KAFKA_SSL_KEY_CREDENTIALS, KAFKA_SSL_KEYSTORE_CREDENTIALS,
+      #   KAFKA_SSL_TRUSTSTORE_FILENAME, KAFKA_SSL_TRUSTSTORE_CREDENTIALS.
+      # Nie zna natomiast zmiennych PEM (KAFKA_SSL_KEYSTORE_*_FILE / *_CERTIFICATES_FILE).
+      # Skutek braku KAFKA_SSL_KEYSTORE_FILENAME:
+      #   /etc/kafka/docker/configure: line 24: !1: unbound variable  -> exit 1
+      #   (funkcja ensure() wola ${!1} przy `set -u`) -> broker w CrashLoopBackOff.
+      # Dlatego cert z cert-managera (Secret kafka-server-tls: tls.crt/tls.key/ca.crt)
+      # konwertujemy do PKCS12 tym samym wzorcem co scripts/port-forward*.sh
+      # (`openssl pkcs12 -export ... -certfile ca.crt`). Hasla sa losowe, generowane
+      # przy starcie poda - nie ma ich ani w Git, ani w Secretach klastra.
+      initContainers:
+        - name: keystores
+          image: docker.io/alpine/openssl:3.5.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              PEM=/etc/kafka-tls
+              OUT=/etc/kafka/secrets
+              # 24 znaki base64 bez /+= (bezpieczne w CLI i w plikach hasel obrazu)
+              gen() { head -c 32 /dev/urandom | base64 | tr -d '\n/+=' | cut -c1-24; }
+              KSP=$(gen); TSP=$(gen)
+              printf '%s' "$KSP" > "$OUT/keystore.creds"
+              printf '%s' "$KSP" > "$OUT/key.creds"
+              printf '%s' "$TSP" > "$OUT/truststore.creds"
+              # keystore: lisc + klucz + lancuch CA (klucz i store maja to samo haslo)
+              openssl pkcs12 -export \
+                -inkey "$PEM/tls.key" -in "$PEM/tls.crt" -certfile "$PEM/ca.crt" \
+                -name kafka-server -out "$OUT/kafka.keystore.p12" -passout "pass:$KSP"
+              # truststore: samo CA (klienci mTLS sa podpisani tym samym davtro-internal CA)
+              openssl pkcs12 -export -nokeys -in "$PEM/ca.crt" \
+                -name davtro-internal-ca -out "$OUT/kafka.truststore.p12" -passout "pass:$TSP"
+              chmod 600 "$OUT"/*
+              echo "===> keystores OK: $(ls -1 "$OUT" | tr '\n' ' ')"
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - { name: kafka-tls, mountPath: /etc/kafka-tls, readOnly: true }
+            - { name: kafka-secrets, mountPath: /etc/kafka/secrets }
       volumes:
         - name: kafka-tls
           secret:
             secretName: kafka-server-tls
+        # PKCS12 + pliki z haslami czytane przez /etc/kafka/docker/configure (emptyDir).
+        - name: kafka-secrets
+          emptyDir: {}
       containers:
         - name: kafka
           image: apache/kafka:3.7.0
@@ -38,12 +84,16 @@ spec:
             - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
             - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
             - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,SSL:SSL" }
-            # Kafka 3.x: PEM dla keystore i truststore; renewal Secretu obsluguje cert-manager.
-            - { name: KAFKA_SSL_KEYSTORE_TYPE, value: "PEM" }
-            - { name: KAFKA_SSL_KEYSTORE_CERTIFICATE_CHAIN_FILE, value: "/etc/kafka-tls/tls.crt" }
-            - { name: KAFKA_SSL_KEYSTORE_KEY_FILE, value: "/etc/kafka-tls/tls.key" }
-            - { name: KAFKA_SSL_TRUSTSTORE_TYPE, value: "PEM" }
-            - { name: KAFKA_SSL_TRUSTSTORE_CERTIFICATES_FILE, value: "/etc/kafka-tls/ca.crt" }
+            # KROK 11 (Kafka SSL): PKCS12 + pliki z haslami z initContainera `keystores`.
+            # Nazwy zmiennych MUSZA byc takie, jakich szuka /etc/kafka/docker/configure
+            # (obraz sam dokleja /etc/kafka/secrets/ do *FILENAME i czyta hasla z plikow).
+            - { name: KAFKA_SSL_KEYSTORE_TYPE, value: "PKCS12" }
+            - { name: KAFKA_SSL_KEYSTORE_FILENAME, value: "kafka.keystore.p12" }
+            - { name: KAFKA_SSL_KEY_CREDENTIALS, value: "key.creds" }
+            - { name: KAFKA_SSL_KEYSTORE_CREDENTIALS, value: "keystore.creds" }
+            - { name: KAFKA_SSL_TRUSTSTORE_TYPE, value: "PKCS12" }
+            - { name: KAFKA_SSL_TRUSTSTORE_FILENAME, value: "kafka.truststore.p12" }
+            - { name: KAFKA_SSL_TRUSTSTORE_CREDENTIALS, value: "truststore.creds" }
             - { name: KAFKA_SSL_CLIENT_AUTH, value: "required" }
             - { name: KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM, value: "https" }
             - { name: KAFKA_LOG_DIRS, value: "/tmp/kraft-combined-logs" }
@@ -52,7 +102,8 @@ spec:
             limits: { cpu: 1, memory: 1Gi }
           volumeMounts:
             - { name: kafka-data, mountPath: /tmp/kraft-combined-logs }
-            - { name: kafka-tls, mountPath: /etc/kafka-tls, readOnly: true }
+            # Keystory PKCS12 + hasla z initContainera (PEM w /etc/kafka-tls czyta tylko initContainer).
+            - { name: kafka-secrets, mountPath: /etc/kafka/secrets, readOnly: true }
   volumeClaimTemplates:
     - metadata: { name: kafka-data }
       spec:
