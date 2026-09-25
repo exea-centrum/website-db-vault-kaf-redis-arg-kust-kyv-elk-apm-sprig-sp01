@@ -8,7 +8,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, date
-from kafka import KafkaProducer
+from .kafka_producer import get_producer, publish_event
 import uvicorn
 
 # KROK 5 (Auth): logowanie rezerwujacych - PBKDF2 (stdlib), sesje w Redis.
@@ -42,7 +42,7 @@ DB_USER_FILE = os.getenv("DB_USER_FILE")
 DB_PASSWORD_FILE = os.getenv("DB_PASSWORD_FILE")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka-kraft:9092")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-kraft:9094")
 
 db_pool = None
 
@@ -204,7 +204,8 @@ async def startup():
     user, password = db_creds()
     db_pool = await create_db_pool(user, password)
     redis_pool = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}", decode_responses=True)
-    kafka_producer = KafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP, value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+    # KROK 11: klient mTLS (confluent-kafka) na listenerze Kafka 9094.
+    kafka_producer = get_producer()
     asyncio.create_task(watch_db_creds())
     await init_db()
 
@@ -212,7 +213,8 @@ async def startup():
 async def shutdown():
     if db_pool: await db_pool.close()
     if redis_pool: await redis_pool.close()
-    if kafka_producer: kafka_producer.close()
+    if kafka_producer:
+        kafka_producer.flush(5)
 
 async def init_db():
     async with db_pool.acquire() as conn:
@@ -516,10 +518,9 @@ async def create_booking(booking: BookingCreate, background_tasks: BackgroundTas
                 booking.total_price, "pending",
             )
     await redis_pool.setex(cache_key, 3600, json.dumps(booking_data))
-    kafka_producer.send("bookings-created", {"event": "booking_created", "booking_id": booking_id, "property_id": booking.property_id, "guest_name": booking.guest_name, "email": booking.email, "phone": booking.phone, "check_in": str(booking.check_in), "check_out": str(booking.check_out), "nights": nights, "total_price": float(booking.total_price), "timestamp": datetime.now().isoformat()})
-    kafka_producer.send("email-invoices", {"event": "invoice_request", "booking_id": booking_id, "email": booking.email, "guest_name": booking.guest_name, "total_price": float(booking.total_price), "property_id": booking.property_id, "check_in": str(booking.check_in), "check_out": str(booking.check_out)})
-    kafka_producer.send("marketing-actions", {"event": "new_booking", "property_id": booking.property_id, "guest_email": booking.email, "guest_name": booking.guest_name, "booking_value": float(booking.total_price), "timestamp": datetime.now().isoformat()})
-    kafka_producer.flush()
+    publish_event("bookings-created", {"event": "booking_created", "booking_id": booking_id, "property_id": booking.property_id, "guest_name": booking.guest_name, "email": booking.email, "phone": booking.phone, "check_in": str(booking.check_in), "check_out": str(booking.check_out), "nights": nights, "total_price": float(booking.total_price), "timestamp": datetime.now().isoformat()})
+    publish_event("email-invoices", {"event": "invoice_request", "booking_id": booking_id, "email": booking.email, "guest_name": booking.guest_name, "total_price": float(booking.total_price), "property_id": booking.property_id, "check_in": str(booking.check_in), "check_out": str(booking.check_out)})
+    publish_event("marketing-actions", {"event": "new_booking", "property_id": booking.property_id, "guest_email": booking.email, "guest_name": booking.guest_name, "booking_value": float(booking.total_price), "timestamp": datetime.now().isoformat()})
     return BookingResponse(id=booking_id, property_id=booking.property_id, property_name="", guest_name=booking.guest_name, email=booking.email, check_in=str(booking.check_in), check_out=str(booking.check_out), total_price=booking.total_price, status="pending", created_at=datetime.now().isoformat())
 
 @app.get("/api/bookings")
