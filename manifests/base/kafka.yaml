@@ -1,4 +1,6 @@
 # Kafka KRaft (bez Zookeepera)
+# KROK 11: dual listener — PLAINTEXT :9092 (kompatybilność/testy) oraz mTLS :9094.
+# UWAGA: :9093 jest kanałem controllera KRaft i nie może być portem klientów.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -15,26 +17,42 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      volumes:
+        - name: kafka-tls
+          secret:
+            secretName: kafka-server-tls
       containers:
         - name: kafka
           image: apache/kafka:3.7.0
-          ports: [{ containerPort: 9092 }]
+          ports:
+            - { name: broker, containerPort: 9092 }
+            - { name: controller, containerPort: 9093 }
+            - { name: tls, containerPort: 9094 }
           env:
             - { name: CLUSTER_ID, value: "MkU3OEVBNTcwNTJENDM2Qk" }
             - { name: KAFKA_NODE_ID, value: "0" }
             - { name: KAFKA_PROCESS_ROLES, value: "controller,broker" }
-            - { name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093" }
-            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka-kraft:9092" }
+            - { name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093,SSL://:9094" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka-kraft:9092,SSL://kafka-kraft:9094" }
             - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "0@kafka-kraft-0.kafka-kraft:9093" }
             - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
             - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,SSL:SSL" }
+            # Kafka 3.x: PEM dla keystore i truststore; renewal Secretu obsluguje cert-manager.
+            - { name: KAFKA_SSL_KEYSTORE_TYPE, value: "PEM" }
+            - { name: KAFKA_SSL_KEYSTORE_CERTIFICATE_CHAIN_FILE, value: "/etc/kafka-tls/tls.crt" }
+            - { name: KAFKA_SSL_KEYSTORE_KEY_FILE, value: "/etc/kafka-tls/tls.key" }
+            - { name: KAFKA_SSL_TRUSTSTORE_TYPE, value: "PEM" }
+            - { name: KAFKA_SSL_TRUSTSTORE_CERTIFICATES_FILE, value: "/etc/kafka-tls/ca.crt" }
+            - { name: KAFKA_SSL_CLIENT_AUTH, value: "required" }
+            - { name: KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM, value: "https" }
             - { name: KAFKA_LOG_DIRS, value: "/tmp/kraft-combined-logs" }
           resources:
             requests: { cpu: 200m, memory: 512Mi }
             limits: { cpu: 1, memory: 1Gi }
           volumeMounts:
-            - name: kafka-data
-              mountPath: /tmp/kraft-combined-logs
+            - { name: kafka-data, mountPath: /tmp/kraft-combined-logs }
+            - { name: kafka-tls, mountPath: /etc/kafka-tls, readOnly: true }
   volumeClaimTemplates:
     - metadata: { name: kafka-data }
       spec:
@@ -52,6 +70,7 @@ spec:
   ports:
     - { name: broker, port: 9092, targetPort: 9092 }
     - { name: controller, port: 9093, targetPort: 9093 }
+    - { name: tls, port: 9094, targetPort: 9094 }
 ---
 apiVersion: batch/v1
 kind: Job

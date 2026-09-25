@@ -13,7 +13,7 @@ from confluent_kafka import Consumer
 from .db import SessionLocal, Booking
 from .email_sender import send_confirmation_email, send_marketing_email
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-kraft:9092")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-kraft:9094")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
@@ -48,6 +48,11 @@ def main():
         "bootstrap.servers": KAFKA_BOOTSTRAP,
         "group.id": "message-processor",
         "auto.offset.reset": "earliest",
+        "security.protocol": "SSL",
+        "ssl.ca.location": os.getenv("KAFKA_CA_FILE", "/etc/kafka-tls/ca.crt"),
+        "ssl.certificate.location": os.getenv("KAFKA_TLS_CERT_FILE", "/etc/kafka-tls/tls.crt"),
+        "ssl.key.location": os.getenv("KAFKA_TLS_KEY_FILE", "/etc/kafka-tls/tls.key"),
+        "ssl.endpoint.identification.algorithm": "https",
     })
     consumer.subscribe(["bookings-created", "marketing-actions"])
     print("message-processor: nasluchiwanie na bookings-created i marketing-actions...")

@@ -36,6 +36,9 @@ spec:
             - { name: VAULT_TRANSIT_CA_FILE, value: "/etc/vault-tls/ca.crt" }
             - { name: VAULT_TRANSIT_KEY, value: "davtro-app" }
             - { name: VAULT_TRANSIT_AUTH_ROLE, value: "davtro-transit" }
+            - { name: KAFKA_TLS_CERT_FILE, value: "/etc/mtls/tls.crt" }
+            - { name: KAFKA_TLS_KEY_FILE, value: "/etc/mtls/tls.key" }
+            - { name: KAFKA_CA_FILE, value: "/etc/mtls/ca.crt" }
             # KROK 6 (mTLS): certyfikaty klienta
             - { name: MTLS_CERT_FILE, value: "/etc/mtls/tls.crt" }
             - { name: MTLS_KEY_FILE, value: "/etc/mtls/tls.key" }

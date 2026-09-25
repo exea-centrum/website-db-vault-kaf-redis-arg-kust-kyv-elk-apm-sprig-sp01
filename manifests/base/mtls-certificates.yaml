@@ -14,7 +14,7 @@ spec:
   commonName: fastapi-web-app.davtro02.svc
   dnsNames:
     - fastapi-web-app.davtro02.svc
-    - fastapi-web-app.davtro02.svc.cluster.local
+    - fastapi-web-app.davtro02.svc.cluster.local1
     - fastapi-web-app-svc.davtro02.svc
     - fastapi-web-app-svc.davtro02.svc.cluster.local
   privateKey:
@@ -117,3 +117,34 @@ spec:
     name: vault-ca
     kind: Issuer
     group: cert-manager.io
+---
+# KROK 11: broker Kafka - dwutrybowy start (PLAINTEXT 9092 + mTLS 9094).
+# 9093 pozostaje wylacznie dla controllera KRaft.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kafka-server-tls
+  namespace: davtro02
+spec:
+  secretName: kafka-server-tls
+  duration: 720h
+  renewBefore: 168h
+  commonName: kafka-kraft.davtro02.svc
+  dnsNames:
+    - kafka-kraft
+    - kafka-kraft.davtro02
+    - kafka-kraft.davtro02.svc
+    - kafka-kraft.davtro02.svc.cluster.local
+    - kafka-kraft-0.kafka-kraft.davtro02.svc.cluster.local
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  issuerRef:
+    name: vault-issuer-internal
+    kind: ClusterIssuer
+    group: cert-manager.io
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth

@@ -27,7 +27,10 @@ spec:
           env:
             - { name: DB_HOST, value: "postgres-clusterip" }
             - { name: DB_NAME, value: "davtro_rentals" }
-            - { name: KAFKA_BOOTSTRAP, value: "kafka-kraft:9092" }
+            - { name: KAFKA_BOOTSTRAP, value: "kafka-kraft:9094" }
+            - { name: KAFKA_TLS_CERT_FILE, value: "/etc/mtls/tls.crt" }
+            - { name: KAFKA_TLS_KEY_FILE, value: "/etc/mtls/tls.key" }
+            - { name: KAFKA_CA_FILE, value: "/etc/mtls/ca.crt" }
             # KROK 6 (Transit): szyfrowanie danych przez Vault Transit Engine
             - { name: VAULT_TRANSIT_ADDR, value: "https://vault.davtro02.svc.cluster.local:8203" }
             - { name: VAULT_TRANSIT_CA_FILE, value: "/etc/vault-tls/ca.crt" }

@@ -1120,3 +1120,22 @@ kubectl -n davtro02 exec vault-0 -- vault status \
   -address=https://127.0.0.1:8203 -cacert=/vault/tls/ca.crt
 ```
 
+
+
+# KROK 11 (Kafka mTLS) — dual listener i automatyczne certyfikaty
+
+Kafka działa równolegle na dwóch listenerach:
+
+- `kafka-kraft:9092` — PLAINTEXT, pozostawiony pomocniczo dla Kafka UI, eksportera i inicjalizacji topiców,
+- `kafka-kraft:9094` — mTLS dla FastAPI, Spring i message-processora.
+
+Port `9093` pozostaje wyłącznie listenerem controllera KRaft. Certyfikat brokera `kafka-server-tls` oraz istniejące certyfikaty klientów są wystawiane przez `vault-issuer-internal` i odnawiane przez cert-manager. Broker wymaga certyfikatu klienta (`ssl.client.auth=required`); aplikacje montują certyfikat i CA pod `/etc/mtls`.
+
+Po wdrożeniu kolejność testu:
+
+1. sprawdzić `Certificate/kafka-server-tls` i Secret `kafka-server-tls`,
+2. sprawdzić, że `kafka-kraft-0` uruchomił się i ma port `9094`,
+3. potwierdzić topic na dotychczasowym `9092`,
+4. potwierdzić, że FastAPI/Spring/message-processor łączą się przez `9094`.
+
+Dopiero po potwierdzeniu pipeline można rozważyć usunięcie listenera PLAINTEXT `9092` oraz przełączenie narzędzi pomocniczych na mTLS.

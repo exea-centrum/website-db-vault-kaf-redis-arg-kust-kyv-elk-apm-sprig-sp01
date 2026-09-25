@@ -44,7 +44,8 @@ echo "Port-forwarding uslug DavTro na $ADDR ... (kubectl: $KC)"
 #   Redis       6379 -> redis:6379
 #   Vault       8243 -> vault:8203 (HTTPS; CA w sekrecie davtro02/vault-tls)
 #   Spark       7077 -> spark-master-svc:7077
-#   Kafka       9092 -> kafka-kraft:9092
+# KROK 11: Kafka ma dwa kanaly — 9092 PLAINTEXT (Kafka UI/exporter/testy),
+# 9094 mTLS (FastAPI/Spring/message-processor). 9093 pozostaje controller KRaft.
 #   Kafka Exp   9308 -> kafka-exporter:9308
 #   PG Exp      9187 -> postgres-exporter:9187
 #   Node Exp    9101 -> node-exporter:9100
@@ -150,6 +151,7 @@ start redis       6379 redis               6379
 start vault       8243 vault               8203
 start spark       7077 spark-master-svc    7077
 start kafka       9092 kafka-kraft         9092
+start kafka-tls   9094 kafka-kraft         9094
 start kafka-exp   9308 kafka-exporter      9308
 start pg-exp      9187 postgres-exporter   9187
 start node-exp    9101 node-exporter       9100
