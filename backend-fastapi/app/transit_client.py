@@ -19,7 +19,7 @@ import base64
 import logging
 import os
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import requests
 
@@ -28,18 +28,63 @@ logger = logging.getLogger(__name__)
 # Token z K8s auth ma ttl=1h - odswiezamy z zapasem, zeby nie trafic na 403.
 TOKEN_TTL_SECONDS = 3000
 
+# KROK 9/10 (Vault HTTPS): CA bootstrapowego cert-managera (Issuer vault-ca ->
+# sekret `vault-tls` montowany w podach). To samo CA ufa Vaultowi w ESO
+# (caProvider) i w helmowym `vault status`.
+DEFAULT_VAULT_CA_FILE = "/etc/vault-tls/ca.crt"
+# Login robi TokenReview na apiserverze - kilka sekund to norma, 10s bywalo za malo.
+DEFAULT_VAULT_TIMEOUT = 30
+
+
+def vault_tls_config() -> Tuple[str, object]:
+    """Adres Vaulta + weryfikacja TLS w JEDNYM miejscu (KROK 9/10).
+
+    FIX: wczesniej `verify` przekazywalo TYLKO `TransitClient._request()`, a
+    `VaultTokenProvider.get_token()` wolalo `requests.post()` bez `verify` -
+    czyli uzywalo systemowego store CA. Cert serwera Vaulta pochodzi z
+    wewnetrznego CA (`davtro-vault-ca`), wiec LOGIN do
+    `auth/kubernetes/login` padal z:
+        SSLError(... CERTIFICATE_VERIFY_FAILED ... unable to get local issuer certificate)
+
+    Skutek awarii: brak tokena -> `encrypt_pii()` i `decrypt_pii()` (main.py)
+    zawsze wracaly z fallbacku, czyli:
+      * w panelu "Moje Rezerwacje" wlasciciel widzial surowy ciphertext
+        `vault:v1:...` zamiast swojego imienia/e-maila,
+      * nowe rezerwacje zapisywaly sie w PostgreSQL jako plaintext (dane PII).
+    """
+    scheme = os.environ.get("VAULT_TRANSIT_SCHEME", "https")
+    addr = os.environ.get("VAULT_TRANSIT_ADDR") or f"{scheme}://vault.davtro02.svc.cluster.local:8203"
+    ca_file = os.environ.get("VAULT_TRANSIT_CA_FILE", DEFAULT_VAULT_CA_FILE)
+    if ca_file and os.path.exists(ca_file):
+        return addr, ca_file
+    if scheme == "https":
+        logger.warning(
+            "Vault: brak pliku CA '%s' - spadam na systemowy store CA; przy wewnetrznym "
+            "CA Vaulta kazde polaczenie (login i transit) padnie z "
+            "CERTIFICATE_VERIFY_FAILED (KROK 9). Ustaw VAULT_TRANSIT_CA_FILE.",
+            ca_file,
+        )
+        return addr, True
+    # HTTP (dev/port-forward bez TLS): nie ma czego weryfikowac.
+    return addr, False
+
 
 class VaultTokenProvider:
     """Pobiera token Vault przez Kubernetes auth (z cache i auto-renew)."""
 
-    def __init__(self):
-        self.vault_addr = os.environ.get(
-            "VAULT_TRANSIT_ADDR",
-            os.environ.get("VAULT_TRANSIT_SCHEME", "https") + "://vault.davtro02.svc.cluster.local:8203",
-        )
+    def __init__(self, vault_addr: Optional[str] = None, verify=None,
+                 timeout: Optional[int] = None):
+        default_addr, default_verify = vault_tls_config()
+        self.vault_addr = vault_addr or default_addr
+        # FIX (KROK 9/10): ten sam `verify` co dla transit/* - bez tego login do
+        # Vaulta szedl po systemowym CA i wszystko konczylo sie fallbackiem.
+        self.verify = default_verify if verify is None else verify
         self.auth_role = os.environ.get(
             "VAULT_TRANSIT_AUTH_ROLE",
             "davtro-transit",
+        )
+        self.timeout = timeout or int(
+            os.environ.get("VAULT_TRANSIT_TIMEOUT", DEFAULT_VAULT_TIMEOUT)
         )
         self._token: Optional[str] = None
         self._token_expiry: float = 0.0
@@ -56,7 +101,16 @@ class VaultTokenProvider:
         url = f"{self.vault_addr}/v1/auth/kubernetes/login"
         payload = {"jwt": sa_token, "role": self.auth_role}
 
-        resp = requests.post(url, json=payload, timeout=10)
+        try:
+            resp = requests.post(
+                url, json=payload, timeout=self.timeout, verify=self.verify
+            )
+        except requests.RequestException as exc:
+            # Najczestsza przyczyna: brak/zly CA dla wewnetrznego CA Vaulta.
+            logger.error(
+                "Vault login failed (%s, CA=%s): %s", url, self.verify, exc
+            )
+            raise
         resp.raise_for_status()
         auth = resp.json()["auth"]
         self._token = auth["client_token"]
@@ -70,17 +124,16 @@ class TransitClient:
     """Client dla Vault Transit Engine."""
 
     def __init__(self, key_name: Optional[str] = None):
-        self.vault_addr = os.environ.get(
-            "VAULT_TRANSIT_ADDR",
-            os.environ.get("VAULT_TRANSIT_SCHEME", "https") + "://vault.davtro02.svc.cluster.local:8203",
-        )
+        # KROK 9/10 (Vault HTTPS): adres + CA z jednego miejsca (vault_tls_config).
+        self.vault_addr, self.verify = vault_tls_config()
         self.key_name = key_name or os.environ.get("VAULT_TRANSIT_KEY", "davtro-app")
-        self.token_provider = VaultTokenProvider()
-        # KROK 9 (Vault HTTPS): weryfikacja TLS certyfikatem CA davtro-internal
-        # (sekret vault-tls zamontowany w podzie). Przy HTTP ignorowane.
-        self.verify = os.environ.get("VAULT_TRANSIT_CA_FILE", "/etc/vault-tls/ca.crt")
-        if not os.path.exists(self.verify):
-            self.verify = True if os.environ.get("VAULT_TRANSIT_SCHEME", "https") == "https" else False
+        self.timeout = int(
+            os.environ.get("VAULT_TRANSIT_TIMEOUT", DEFAULT_VAULT_TIMEOUT)
+        )
+        # FIX (KROK 9/10): token provider dostaje ten sam `verify` - wczesniej
+        # logowal sie po systemowym store CA i nie mogl wystawic tokena,
+        # przez co encrypt/decrypt zawsze konczyly sie fallbackiem.
+        self.token_provider = VaultTokenProvider(self.vault_addr, self.verify)
         self._session = requests.Session()
 
     def _request(self, path: str, payload: Dict[str, str]) -> Dict:
@@ -93,7 +146,8 @@ class TransitClient:
                 logger.error("Vault auth failed: %s", exc)
                 raise
             resp = self._session.post(
-                url, json=payload, headers={"X-Vault-Token": token}, timeout=30, verify=self.verify
+                url, json=payload, headers={"X-Vault-Token": token},
+                timeout=self.timeout, verify=self.verify,
             )
             if resp.status_code == 403 and attempt == 1:
                 logger.warning("Vault 403 - odswiezam token i ponawiam")

@@ -921,10 +921,31 @@ auto-rotacja co 30 dni) przed zapisem do PostgreSQL, a odszyfrowywane przy odczy
 **Env w deploymentie (`deployment.yaml`):**
 | Env | Wartość |
 |---|---|
-| `VAULT_TRANSIT_ADDR` | `http://vault.davtro02.svc.cluster.local:8200` |
+| `VAULT_TRANSIT_ADDR` | `https://vault.davtro02.svc.cluster.local:8203` (od KROK 9/10) |
+| `VAULT_TRANSIT_CA_FILE` | `/etc/vault-tls/ca.crt` (CA `davtro-vault-ca` z sekretu `vault-tls`) |
 | `VAULT_TRANSIT_KEY` | `davtro-app` |
 | `VAULT_TRANSIT_AUTH_ROLE` | `davtro-transit` |
+| `VAULT_TRANSIT_TIMEOUT` | `30` (login robi TokenReview na apiserverze – 10 s bywało za mało) |
 | `VAULT_TRANSIT_ENABLED` | `true` (można wyłączyć, by zapisywać plaintext) |
+
+**FIX (KROK 9/10) — dlaczego właściciel widział `vault:v1:...` w „Moje Rezerwacje”:**
+Po przełączeniu Vaulta na TLS (`:8203`) `verify` (CA) przekazywało tylko
+`TransitClient._request()`, a `VaultTokenProvider.get_token()` wołało
+`requests.post()` **bez `verify=`** — czyli z systemowym store CA. Cert serwera
+Vaulta pochodzi z wewnętrznego CA `davtro-vault-ca`, więc logowanie
+`auth/kubernetes/login` padało z:
+
+```
+SSLError(... CERTIFICATE_VERIFY_FAILED ... unable to get local issuer certificate)
+```
+
+Skutek: brak tokena → `encrypt_pii()`/`decrypt_pii()` zawsze wracały z fallbacku,
+czyli panel „Moje Rezerwacje” pokazywał surowy ciphertext zamiast danych gościa
+(obce rezerwacje maskowane prawidłowo, bo tam deszyfrowanie w ogóle nie jest
+wywoływane). Poprawka: adres + `verify` są liczone w jednym miejscu
+(`vault_tls_config()` w `transit_client.py`) i używane przez **oba** klienty
+(login oraz `transit/*`), plus ostrzeżenie w logu, gdy plik CA nie istnieje.
+Diagnostyka: `python -c "import requests; print(requests.get('https://vault.davtro02.svc.cluster.local:8203/v1/sys/health', verify='/etc/vault-tls/ca.crt').status_code)"`.
 
 **Fail-safe:** gdy Vault lub auth jest chwilowo niedostępny (startup, rotacja tokena,
 awaria), aplikacja **loguje błąd i zapisuje odczytane/zapisywane dane jako plaintext**
@@ -1070,6 +1091,7 @@ Certy `davtro-tls` podpisuje Vault PKI przez cert-manager i sam je renewuje; w p
 - **Klienci przelaczeni na `https://vault.davtro02.svc.cluster.local:8203`:**
   - ESO: `secret-store.yaml` (2 store'y), `external-secrets-db-dynamic.yaml` (VaultDynamicSecret) - `caProvider` typ Secret `vault-tls` key `ca.crt` (CA czytane z sekretu, nic w Git).
   - FastAPI: `deployment.yaml` - env `VAULT_TRANSIT_ADDR=https...:8203`, `VAULT_TRANSIT_CA_FILE=/etc/vault-tls/ca.crt`, mount `vault-tls`; `transit_client.py` weryfikuje CA (fail-safe: bez certu fallback plaintext z logiem, jak KROK 4).
+  - **FIX (transit po TLS):** `verify` jest liczony w `vault_tls_config()` i podawany **także w loginie** `auth/kubernetes/login` (`VaultTokenProvider`) - wcześniej login szedł z systemowym store CA i padał na `unable to get local issuer certificate`, przez co `encrypt_pii`/`decrypt_pii` były zawsze w fallbacku (panel pokazywał `vault:v1:...`, a nowe dane zapisywały się jako plaintext).
   - Spring + message-processor: te same env + mount (po stronie kodu Java wymaga wsparcia CA_FILE - do weryfikacji przy wdrozeniu).
   - transit-helpers (`transit-helpers.yaml`): `SecretStore/vault-transit` — `VAULT_ADDR`/`server: https://vault.davtro02.svc.cluster.local:8203` + `caProvider { type: Secret, name: vault-tls, key: ca.crt }` (ten sam mechanizm co ESO, sekret CA czytany z K8s, nic w Git).
   - Snapshot CronJob: `VAULT_ADDR=https...:8203` + `VAULT_CACERT` + mount.
