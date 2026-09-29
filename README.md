@@ -1161,3 +1161,6 @@ Po wdrożeniu kolejność testu:
 4. potwierdzić, że FastAPI/Spring/message-processor łączą się przez `9094`.
 
 Dopiero po potwierdzeniu pipeline można rozważyć usunięcie listenera PLAINTEXT `9092` oraz przełączenie narzędzi pomocniczych na mTLS.
+
+
+
