@@ -49,14 +49,55 @@ spec:
               openssl pkcs12 -export \
                 -inkey "$PEM/tls.key" -in "$PEM/tls.crt" -certfile "$PEM/ca.crt" \
                 -name kafka-server -out "$OUT/kafka.keystore.p12" -passout "pass:$KSP"
-              # truststore: samo CA (klienci mTLS sa podpisani tym samym davtro-internal CA)
-              openssl pkcs12 -export -nokeys -in "$PEM/ca.crt" \
-                -name davtro-internal-ca -out "$OUT/kafka.truststore.p12" -passout "pass:$TSP"
+              # NIE BUDUJEMY TUTAJ TRUSTSTORE z openssl (`pkcs12 -export -nokeys`).
+              # Tak wygenerowany PKCS#12 jest dla JVM "pusty": Java nie traktuje
+              # cert-bagu z klucza prywatnego jako trustedCertEntry, wiec PKIX
+              # dostaje zero trust anchors. Objaw w logach brokera (KROK 11 byl pozorny):
+              #   java.security.InvalidAlgorithmParameterException: the trustAnchors
+              #   parameter must be non-empty
+              # Przy KAFKA_SSL_CLIENT_AUTH=required broker odrzuca wtedy certy klientow,
+              # czyli fastapi/message-processor nie maja jak polaczyc sie z :9094
+              # (rdkafka: "Disconnected while requesting ApiVersion").
+              # Truststore buduje osobny initContainer `truststore` przez keytool.
               chmod 600 "$OUT"/*
-              echo "===> keystores OK: $(ls -1 "$OUT" | tr '\n' ' ')"
+              echo "===> keystore OK: $(ls -1 "$OUT" | tr '\n' ' ')"
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - { name: kafka-tls, mountPath: /etc/kafka-tls, readOnly: true }
+            - { name: kafka-secrets, mountPath: /etc/kafka/secrets }
+        # KROK 11 (poprawka): truststore PKCS12 MUSI powstac przez `keytool -importcert`
+        # (trustedCertEntry). Java/PKIX odrzuca cert-bag z `openssl pkcs12 -export -nokeys`
+        # -> "the trustAnchors parameter must be non-empty" -> przy CLIENT_AUTH=required
+        # broker nie przyjmuje zadnego certu klienta.
+        # Obraz apache/kafka:3.7.0 ma JDK (/opt/java/openjdk/bin/keytool) i jest juz
+        # uzywany przez ten StatefulSet, wiec nie dochodzi zadnego nowego obrazu.
+        - name: truststore
+          image: apache/kafka:3.7.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              KEYTOOL=/opt/java/openjdk/bin/keytool
+              OUT=/etc/kafka/secrets
+              TSP="$(cat "$OUT/truststore.creds")"
+              rm -f "$OUT/kafka.truststore.p12"
+              "$KEYTOOL" -importcert -noprompt -trustcacerts \
+                -alias davtro-internal-ca \
+                -file /etc/kafka-tls/ca.crt \
+                -keystore "$OUT/kafka.truststore.p12" \
+                -storetype PKCS12 -storepass "$TSP"
+              chmod 600 "$OUT/kafka.truststore.p12"
+              # Sanity check: truststore musi zawierac dokladnie 1 trustedCertEntry.
+              # grep bez trafienia = set -e ubije initContainer (lepiej crash niz
+              # broker bez trust anchorow, o czym swiadczy w logach stack trace).
+              "$KEYTOOL" -list -v -keystore "$OUT/kafka.truststore.p12" \
+                -storepass "$TSP" | grep -E 'Entry type: trustedCertEntry|Alias name: davtro-internal-ca|Your keystore contains'
+              echo "===> truststore OK (trustedCertEntry=1)"
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 256Mi }
           volumeMounts:
             - { name: kafka-tls, mountPath: /etc/kafka-tls, readOnly: true }
             - { name: kafka-secrets, mountPath: /etc/kafka/secrets }

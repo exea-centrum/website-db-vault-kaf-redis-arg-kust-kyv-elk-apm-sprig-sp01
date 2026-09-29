@@ -48,6 +48,15 @@ data:
     }
     telemetry {
       prometheus_retention = "12h"
+      # KROK 12 (metryki Vaulta): w tym klastrze jest zwykly Prometheus
+      # (Deployment), a nie Prometheus Operator - pliki service-monitors.yaml
+      # czekaja na operatora i nikt nie scrape'uje Vaulta. Dlatego job `vault`
+      # w prometheus.yaml laczy sie po HTTPS z CA z sekretu `vault-tls`.
+      # /v1/sys/metrics normalnie wymaga tokenu, wiec dopuszczamy odczyt
+      # BEZ uwierzytelniania: endpoint wystawia wylacznie metryki (liczniki
+      # requestow, latencje, stan raft/mounts) - zero sekretow i zero PII.
+      unauthenticated_metrics_access = true
+      disable_hostname = true
     }
   start.sh: |
     # Secret vault-tls jest niewymaganym? NIE: od KROK 10 jest obowiazkowy.
