@@ -33,6 +33,10 @@ data:
       # `unauthenticated_metrics_access` - wystawia tylko metryki, zero sekretow.
       - job_name: vault
         scheme: https
+        # Vault NIE wystawia metryk pod /metrics - endpoint to /v1/sys/metrics.
+        # Bez metrics_path Prometheus dostaje w odpowiedzi "<" (redirect/error UI)
+        # i konczy bledem: expected a valid start token ... ("INVALID").
+        metrics_path: /v1/sys/metrics
         tls_config:
           ca_file: /etc/prometheus-vault-tls/ca.crt
           server_name: vault.davtro02.svc.cluster.local
