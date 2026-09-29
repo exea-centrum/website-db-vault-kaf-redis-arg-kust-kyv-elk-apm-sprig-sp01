@@ -24,6 +24,10 @@ metadata:
   namespace: davtro02
 spec:
   schedule: "0 3 * * *"
+  # KROK 12: backup ma byc WYLACZONY - CronJob byl wstrzymany recznie
+  # (suspend=true), a w repo tego nie bylo, wiec nikt tego nie widzial.
+  # Deklarujemy to jawnie, żeby wyłączenie backupu zostawiało ślad w Git.
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3

@@ -31,6 +31,14 @@ data:
     path "davtro/data/*" { capabilities = ["read"] }
     path "database/creds/davtro-app-rw" { capabilities = ["read"] }
   davtro-snapshot.hcl: |
+    # KROK 12 (snapshot faktycznie dzialajacy): `vault operator raft snapshot save`
+    # od Vault 1.x uzywa sciezki sys/STORAGE/raft/snapshot - nie istniejacej juz
+    # w 1.17 sciezki sys/raft/snapshot. Bez tego CronJob konczyl sie bledem:
+    #   Error making API request.
+    #   URL: .../v1/sys/storage/raft/snapshot   Code: 403 permission denied
+    # (GET = "czy trwa juz snapshot" -> read; PUT = zapis/odtworzenie
+    #  -> create/update + sudo). Stara sciezka zostaje dla zgodnosci wstecz.
+    path "sys/storage/raft/snapshot" { capabilities = ["read", "create", "update", "sudo"] }
     path "sys/raft/snapshot" { capabilities = ["sudo", "read"] }
   # KROK 6 (Transit): szyfrowanie danych aplikacyjnych (DEK/KEK).
   # Aplikacje szyfrują wrażliwe dane (PII, numery telefonów, e-maile) przed zapisem do bazy.
