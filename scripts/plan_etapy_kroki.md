@@ -94,3 +94,44 @@ Konkretnie:
 **Po tym** kolejność dalej: OIDC dla GitHub Actions (największy zysk), potem least-privilege role `spring-ro`/`spark-ro`, TLS Postgres/Redis.
 
 Chcesz, żebym od razu wykonał restart Vaulta + weryfikację targetu (kroki 1–2, niskie ryzyko, kilka minut), czy najpierw wolisz pełny test restore (krok 3, wolniejszy)?
+
+
+# ########
+Zweryfikowałem wszystkie warstwy. Odpowiedź na Twoje pytanie o szyfrowanie + plan 5→8:
+
+## Mapa szyfrowania — co jest, a czego nie ma
+
+| Warstwa | Szyfrowanie | Stan |
+|---|---|---|
+| **Zewnątrz (ingress)** | HTTPS 443 → `davtro.local`, `spark.davtro.local` (cert z Vault PKI) | ✅ działa, ale **terminacja na ingressie** |
+| **Ingress → aplikacje** | **HTTP :8080 plaintext** | ❌ **brak** — NetworkPolicy przepuszcza ingress→`8080` |
+| **Aplikacja → aplikacja** | **brak** — fastapi/consumer/spring nie mają portu HTTPS, tylko `:8080`; certy mTLS istnieją, ale są używane **wyłącznie do Kafki** | ❌ **brak** (mTLS jest w praktyce tylko dla Kafki) |
+| **Aplikacja → Kafka** | **mTLS :9094**, `CLIENT_AUTH=required` | ✅ potwierdzone (TLS 1.3, handshake OK) |
+| Kafka obok tego | **PLAINTEXT :9092** też istnieje i jest advertise'owany; inter-broker = PLAINTEXT | ⚠️ obejście mTLS w klastrze |
+| **Aplikacja → Vault** | **TLS :8203**, ale `tls_disable_client_certs = true` (komentarz w repo: „klienci autoryzują się tokenem") | ✅ szyfrowane, ⚠️ **bez mTLS** |
+| **Aplikacja → Postgres** | **`?sslmode=disable`** w Vault database engine, brak `ssl_cert_file` w postgres.yaml | ❌ **plaintext, w tym hasło dyncred** |
+| **Aplikacja → Redis** | `redis:7-alpine`, **brak `requirepass`**, brak TLS | 🔴 **najsłabsze ogniwo: zero uwierzytelniania + plaintext** |
+| **Dane w Postgres** | Transit PII (`aes256-gcm96`, 13/13 wierszy) | ✅ działa |
+
+**Wniosek:** szyfrowanie jest **zewnętrzne (ingress), na Kafce i na danych w spoczynku (Transit)**. **Wewnątrz klastru praktycznie nic poza Kafką nie jest szyfrowane** — Postgres, Redis i ruch app↔app idą czystym tekstem, a Redis w ogóle nie ma hasła.
+
+## Rekomendacja: zacząć od 5, ale z jednym wtrąceniem P0
+
+Twoja kolejność jest dobra, ale **„Redis bez hasła" nie jest P2 — to P0**, bo każdy pod w namespace (a `allow-intra-namespace` dopuszcza wszystko) czyta i nadpisuje cache sesji, bez żadnego sekretu. Dlatego:
+
+### KROK 5 (least-privilege) — z dwoma dodatkami
+1. **`redis` → `requirepass` z hasłem z Vault KV** (przez ESO, `creationPolicy: Owner`, `refreshInterval: 30m`) + `REDIS_PASSWORD_FILE` w appkach. *Kilkanaście minut, zerowy downtime po restarcie, ogromny zysk.*
+2. Osobne SA per workload: `fastapi-sa`, `processor-sa`, `spring-sa`, `spark-sa` (zamiast wszystkie na `davtro-sa`), i **nowe role Vault z węższymi politykami**:
+   - `davtro-transit-fastapi` (transit encrypt/decrypt, bez `database/creds`)
+   - `davtro-transit-processor` (jwtnie, bo to konsument)
+   - `davtro-db-spring` / `davtro-db-spark` → **`database/creds/davtro-spring-ro` i `davtro-db-spark-ro`** (role Postgres z `GRANT SELECT` tylko) + nowe ExternalSecrets, żeby **spring/spark przestały używać statycznego `davtro-secrets`**.
+   - Efekt: wyciek w spring/spark nie daje ani prawa zapisu, ani współdzielonego hasła z fastapi.
+
+### Potem 6 → 7 → 8
+- **6 TLS Postgres + Redis**: Postgres — nowy `Certificate` przez `vault-issuer-internal` (`postgres.davtro02.svc`), `ssl=on` + `ssl_cert_file`/`ssl_key_file` w postgres.yaml, `sslmode=verify-full` + `sslrootcert` w `connection_url` (Vault database engine) i w `davtro-secrets` dla statycznych klientów. Redis — TLS wymaga zmiany obrazu/komend, więc **Redis = `redis:7-alpine` + stunnel** albo przejście na obraz z TLS-em.
+- **7 Rewrap + HMAC blind index**: klucz `davtro-app` już ma `auto_rotate_period=720h` i alert `vault_transit_last_rotation_time` — brakuje procedury `rewrap` po rotacji i `hmac` dla lookupu e-mailu.
+- **8 Auto-unseal + HA 3 + `newTag: latest`**: osobny temat, dopiero po stabilizacji 5–7.
+
+**Moja odpowiedź na „jaki następny krok": KROK 5, zaczynając od hasła Redisa, potem role Vault per workload + `spring-ro`/`spark-ro`.**
+
+Powiedz „start" — wdrożę to etapami: (1) Redis `requirepass` + weryfikacja, (2) SA per workload i role Vault, (3) `spring-ro`/`spark-ro` i odłączenie ich od statycznego `davtro-secrets`. Zatrzymuję się na każdym etapie do weryfikacji na klastrze, i pamiętaj o niewypchniętym commicie `a0b1861` (KROK 12) — wypchnę go w osobnym kroku, żeby nie mieszać zmian.
