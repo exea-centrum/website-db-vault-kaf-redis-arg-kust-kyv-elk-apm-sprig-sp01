@@ -91,3 +91,4 @@ spec:
             # optional: cert powstaje dopiero po starcie Vaulta (klero-wajka).
             - name: vault-tls
               secret: { secretName: vault-tls, optional: true }
+

@@ -10,7 +10,8 @@
 #   5. database engine + rola davtro-app-rw; jesli haslo davtro w KV nie pasuje do
 #      zywego Postgresa -> ALIGN: ALTER USER przez kubectl exec (local trust), czekanie
 #      az ESO odswiezy davtro-secrets, rollout restart pgadmin/exporter/spring
-# Wymaga: PVC vault-data-vault-0 na tym samym nodzie (RWO, microk8s single-node).
+# Wymaga: PVC vault-data-vault-0 na tym samym nodzie (RWO, microk8s single-node)
+# test.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -418,3 +419,4 @@ spec:
           emptyDir: {}
         - name: vault-tls
           secret: { secretName: vault-tls }
+

@@ -171,3 +171,5 @@ spec:
     # 8200 celowo nie istnieje: API jest wylacznie na TLS.
     - { name: raft, port: 8201, targetPort: 8201 }
     - { name: https, port: 8203, targetPort: 8203 }
+
+
