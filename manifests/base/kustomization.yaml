@@ -4,6 +4,7 @@ kind: Kustomization
 # KROK 5 (PKI): Vault CA + cert-manager. AKTYWNE - cert-manager zainstalowany
 # na klastrze (CRD ClusterIssuer/Certificate istnieja, SA cert-manager-vault +
 # Secret cert-manager-vault-token gotowe). Kolejnosc celowa: issuer przed certami.
+# ETAP 1 (Istio): wejscie przez istio-ingressgateway (Traefik nadal dziala = rollback).
 resources:
 - namespace.yaml
 - serviceaccount.yaml
@@ -38,7 +39,6 @@ resources:
 - network-policies.yaml
 - network-policies-istio.yaml
 - ingress.yaml
-# ETAP 1 (Istio): wejscie przez istio-ingressgateway (Traefik nadal dziala = rollback).
 - istio-gateway.yaml
 - istio-virtualservices.yaml
 - kyverno-policy.yaml
@@ -51,16 +51,16 @@ resources:
 images:
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01
-  newTag: 83bb8e944ee3594f4f5da6c94906749673aa3803
+  newTag: cd7b1547c4ce3bc5f289ae3c24ac494e96472284
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-consumer
-  newTag: 83bb8e944ee3594f4f5da6c94906749673aa3803
+  newTag: cd7b1547c4ce3bc5f289ae3c24ac494e96472284
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-frontend
-  newTag: 83bb8e944ee3594f4f5da6c94906749673aa3803
+  newTag: cd7b1547c4ce3bc5f289ae3c24ac494e96472284
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spark
-  newTag: 83bb8e944ee3594f4f5da6c94906749673aa3803
+  newTag: cd7b1547c4ce3bc5f289ae3c24ac494e96472284
 - name: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
   newName: ghcr.io/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01-spring
-  newTag: 83bb8e944ee3594f4f5da6c94906749673aa3803
+  newTag: cd7b1547c4ce3bc5f289ae3c24ac494e96472284
