@@ -36,7 +36,11 @@ resources:
 - pgadmin.yaml
 - kafka-ui.yaml
 - network-policies.yaml
+- network-policies-istio.yaml
 - ingress.yaml
+# ETAP 1 (Istio): wejscie przez istio-ingressgateway (Traefik nadal dziala = rollback).
+- istio-gateway.yaml
+- istio-virtualservices.yaml
 - kyverno-policy.yaml
 - pki-issuer.yaml
 - vault-server-tls.yaml

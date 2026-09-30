@@ -1,0 +1,36 @@
+# ETAP 2 (Istio) - default-deny-ingress (network-policies.yaml) odcina ruch
+# z namespace `istio-system` do aplikacji, tak samo jak wczesniej odcinal Traefika
+# (reguly allow-ingress-controller-to-* zostaja nietkniete = parytet/droga powrotu).
+#
+# Dlatego dodajemy JAWNE wpuszczenie istio-ingressgateway -> back-endy.
+# NICZEGO nie usuwamy - to regula DODATKOWA (uzupelnia, nie zastepuje).
+#
+# UWAGA: celowo BEZ `ports:` - back-endy maja rozne porty (8080/3000/80/8082),
+# a w ETAPIE 6 (sidecary) dojda porty Envoy 15020/15021/15090 i wtedy zamiast
+# dopisywac porty do kazdej reguly, ta jedna regula juz je przepuszcza.
+# Jesli chcesz twardo (tylko porty aplikacji) - rozbij na reguly per-port i
+# pamietaj o dodaniu 15020/15021/15090 przed wlaczeniem sidecarow.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-istio-ingressgateway
+  namespace: davtro02
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - fastapi-web-app
+          - frontend
+          - grafana
+          - kafka-ui
+          - pgadmin
+          - spark-master
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+  policyTypes:
+    - Ingress

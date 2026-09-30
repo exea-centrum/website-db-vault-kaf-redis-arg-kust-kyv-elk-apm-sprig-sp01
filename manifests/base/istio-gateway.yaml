@@ -1,0 +1,50 @@
+# ETAP 1 (Istio) - wejscie do klastra przez istio-ingressgateway.
+# Traefik (addon `ingress`, ns `ingress`) ZOSTAJE nietkniety = droga powrotu.
+# Nie ma kolizji portow: Traefik NodePort 31086/30968, Istio 31426/31411.
+#
+# WERYFIKACJA (klaster, 2026-09-30):
+#   istiod/proxyv2 = 1.18.2 -> networking.istio.io servuje TYLKO v1alpha3/v1beta1
+#   (v1 NIE istnieje dla Gateway/VirtualService), dlatego uzywamy v1beta1.
+#   Pod istio-ingressgateway ma label `istio: ingressgateway` (selektor ponizej).
+#
+# UWAGA (SDS/credentialName): sekret TLS MUSI byc w TYM SAMYM namespace co Gateway
+# (davtro02). U nas jest: davtro-tls i spark-tls tworzy cert-manager (Certificate
+# <- ClusterIssuer/vault-issuer <- Vault PKI) w davtro02. istiod pobiera je przez
+# SDS i podaje do proxy w istio-system, dlatego nie kopiujemy sekretow.
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: davtro-gateway
+  namespace: davtro02
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    # HTTP bez TLS: zostawiony dla testow i port-forward (parytet z Ingress).
+    # HTTPS obok, ten sam host - przegladarka moze trafic na 80 albo 443.
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - davtro.local
+        - spark.davtro.local
+    # Dwa servery na :443 rozrozniane po SNI/hoscie - kazdy z wlasnym certem.
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: davtro-tls
+      hosts:
+        - davtro.local
+    - port:
+        number: 443
+        name: https-spark
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: spark-tls
+      hosts:
+        - spark.davtro.local

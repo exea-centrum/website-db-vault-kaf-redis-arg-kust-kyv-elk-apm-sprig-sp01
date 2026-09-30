@@ -1,0 +1,75 @@
+# ETAP 1 (Istio) - routing 1:1 z manifests/base/ingress.yaml (davtro-ingress + spark-ingress).
+#
+# KLUCZOWA ROZNICA vs Ingress: w VirtualService KOLEJNOSC reguł MA ZNACZENIE
+# (Ingress dopasowuje "longest prefix" sam, VirtualService bierze pierwsza pasujaca
+# regule). Dlatego sciezka "/" (catch-all -> frontend) jest OSTATNIA.
+#
+# Parytet z Ingressem: VirtualService NIE zdejmuje prefiksu sciezki, wiec /grafana,
+# /kafka-ui, /pgadmin docieraja do aplikacji z tym prefiksem - identycznie jak
+# przez Traefik. To zachowanie celowe (brak zmiany semantyki przy migracji).
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: davtro-vs
+  namespace: davtro02
+spec:
+  hosts:
+    - davtro.local
+  gateways:
+    - davtro-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /api
+      route:
+        - destination:
+            host: fastapi-web-app-svc.davtro02.svc.cluster.local
+            port:
+              number: 80
+    - match:
+        - uri:
+            prefix: /grafana
+      route:
+        - destination:
+            host: grafana.davtro02.svc.cluster.local
+            port:
+              number: 3000
+    - match:
+        - uri:
+            prefix: /kafka-ui
+      route:
+        - destination:
+            host: kafka-ui.davtro02.svc.cluster.local
+            port:
+              number: 80
+    - match:
+        - uri:
+            prefix: /pgadmin
+      route:
+        - destination:
+            host: pgadmin.davtro02.svc.cluster.local
+            port:
+              number: 80
+    # catch-all = "/" (frontend SPA). MUSI byc ostatni.
+    - route:
+        - destination:
+            host: frontend-svc.davtro02.svc.cluster.local
+            port:
+              number: 80
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: spark-vs
+  namespace: davtro02
+spec:
+  hosts:
+    - spark.davtro.local
+  gateways:
+    - davtro-gateway
+  http:
+    - route:
+        - destination:
+            host: spark-master-svc.davtro02.svc.cluster.local
+            port:
+              number: 8082
