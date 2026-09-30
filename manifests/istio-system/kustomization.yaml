@@ -1,0 +1,14 @@
+# ETAP 1 (Istio) - warstwa `istio-system`: TLS dla istio-ingressgateway.
+#
+# DLACZEGO OSOBNA SCIEZKA (a nie manifests/base):
+#   overlays/production ustawia globalny `namespace: davtro02`, a transformer
+#   namespace w kustomize NADPISUJE namespace wszystkich zasobow.Proba trzymania
+#   Certificate/istio-system w manifests/base konczy sie bledem:
+#     error: namespace transformation produces ID conflict [...]
+#   (cert davtro-tls zostaje przeniesiony do davtro02 i zderza sie z istniejacym).
+#   Ta sciezka NIE ma globalnego `namespace:`, wiec jawny `namespace: istio-system`
+#   w zasobach jest zachowany.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gateway-tls.yaml

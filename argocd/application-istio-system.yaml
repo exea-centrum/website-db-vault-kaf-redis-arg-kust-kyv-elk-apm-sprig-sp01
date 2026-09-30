@@ -1,0 +1,28 @@
+# ETAP 1 (Istio): TLS dla istio-ingressgateway - OSOBNA Application.
+#
+# Po co druga Application: sekrety `credentialName` dla wspoldzielonego
+# istio-ingressgateway musza lezec w istio-system (patrz manifests/istio-system/gateway-tls.yaml),
+# a overlays/production nadpisuje namespace na davtro02, wiec nie da sie ich
+# poprawnie wciagnac do app `davtro-website` (blad: namespace transformation
+# produces ID conflict).
+#
+# Jednorazowe zaaplikowanie (poza Gitem, jak argocd/application.yaml):
+#   microk8s kubectl apply -f argocd/application-istio-system.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: davtro-istio-system
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/exea-centrum/website-db-vault-kaf-redis-arg-kust-kyv-elk-apm-sprig-sp01.git
+    targetRevision: HEAD
+    path: manifests/istio-system
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,43 @@
+# ETAP 1 (Istio) - certy TLS dla istio-ingressgateway.
+#
+# ZWERYFIKOWANE EMPIRYCZNIE (2026-09-30, Istio 1.18.2, Gateway w davtro02):
+#   istiod wygenerowal w Envoy SDS referencje BEZ namespace:
+#       sds_secrets=['kubernetes://davtro-tls']
+#   => sekret jest rozwiazywany w namespace PROXY (istio-system), a NIE w namespace
+#      Gatewaya (davtro02). Objaw przed poprawka: reset TLS handshake (curl exit 35)
+#      i w logach istio-proxy: 'initial fetch timed out ... v3.Secret'.
+#      Po umieszczeniu sekretow w istio-system: HTTPS 200 dla obu hostow.
+#
+# Te same hosty co w manifests/base/certificates.yaml, ten sam ClusterIssuer Vault PKI.
+# Certy w davtro02 ZOSTAJA (korzysta z nich jeszcze Ingress/Traefik = droga powrotu).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: davtro-tls
+  namespace: istio-system
+spec:
+  secretName: davtro-tls
+  duration: 2160h   # 90d
+  renewBefore: 360h # 15d
+  commonName: davtro.local
+  dnsNames:
+    - davtro.local
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spark-tls
+  namespace: istio-system
+spec:
+  secretName: spark-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: spark.davtro.local
+  dnsNames:
+    - spark.davtro.local
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
