@@ -10,7 +10,9 @@ spec:
     matchLabels: { app: fastapi-web-app }
   template:
     metadata:
-      labels: { app: fastapi-web-app }
+      # ETAP 6 (Istio): wstrzykniecie sidecara tylko dla tego workloadu
+      # (nie ustawiamy labela na calym namespace - reszta podow zostaje jak byla).
+      labels: { app: fastapi-web-app, sidecar.istio.io/inject: "true" }
     spec:
       serviceAccountName: davtro-sa
       securityContext:

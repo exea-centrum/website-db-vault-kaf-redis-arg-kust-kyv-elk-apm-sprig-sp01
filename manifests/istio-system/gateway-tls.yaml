@@ -41,3 +41,4 @@ spec:
   issuerRef:
     name: vault-issuer
     kind: ClusterIssuer
+

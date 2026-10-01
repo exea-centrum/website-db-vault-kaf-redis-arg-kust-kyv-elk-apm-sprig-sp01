@@ -41,6 +41,7 @@ resources:
 - ingress.yaml
 - istio-gateway.yaml
 - istio-virtualservices.yaml
+- istio-peer-authentication.yaml
 - kyverno-policy.yaml
 - pki-issuer.yaml
 - vault-server-tls.yaml

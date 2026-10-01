@@ -1,0 +1,20 @@
+# ETAP 6 (Istio, sidecary): wymuszenie mTLS w namespace.
+#
+# Startujemy od PERMISSIVE (mode: PERMISSIVE) - to tryb domyslny Istio, ale zapisujemy
+# go JAWNIE, zeby zmiana na STRICT byla jednym slowem w tym pliku.
+#   PERMISSIVE = akceptuj i mTLS (od sidecarow), i czysty tekst (od stalych klientow,
+#                np. Traefik dopoki dziala, oraz od podow bez sidecara).
+#   STRICT     = tylko mTLS; wlaczamy dopiero, gdy WSZYSTKIE pody w ns maja sidecar
+#                (a Traefik jest wylaczony), inaczej ruch sie urwie.
+#
+# To jest warstwa mTLS "App-to-App" - certy rotuje istiod (SDS), w pamieci Envoya,
+# domyslnie co 24h (global.defaultConfig / workload cert TTL), bez restartu poda
+# i bez wolumenow z plikami certow.
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: davtro02
+spec:
+  mtls:
+    mode: PERMISSIVE

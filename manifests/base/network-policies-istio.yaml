@@ -34,3 +34,28 @@ spec:
               kubernetes.io/metadata.name: istio-system
   policyTypes:
     - Ingress
+---
+# ETAP 6 (Istio, sidecary): porty agenta/Envoya potrzebne, gdy pod dostanie sidecar.
+# default-deny-ingress blokuje 15020, a injector PRZEPISUJE proby kubeleta wlasnie na
+# :15020 (rewriteAppHTTPProbe) -> bez tej reguly pody nie beda Ready.
+#   15020 - pilot-agent: /healthz/ready + scalone metryki (proby + Prometheus)
+#   15021 - status-port Envoya (readiness gatewaya)
+#   15090 - Envoy /stats/prometheus (scrape)
+# Brak `from:` = dowolne zrodlo (kubelet nie jest podem, wiec nie da sie go wskazac
+# podSelector-em). To porty tylko do odczytu stanu, bez powierzchni aplikacyjnej.
+# Regula jest bezpieczna takze PRZED wlaczeniem sidecarow - nic tam nie slucha.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-istio-probe-and-metrics-ports
+  namespace: davtro02
+spec:
+  podSelector: {}
+  ingress:
+    - ports:
+        - { protocol: TCP, port: 15020 }
+        - { protocol: TCP, port: 15021 }
+        - { protocol: TCP, port: 15090 }
+  policyTypes:
+    - Ingress
+
